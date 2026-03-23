@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CrossBorderPay | Blockchain Portal v2.0</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="layout">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="branding">
+                    <div class="brand-logo">CBP</div>
+                    <h1>CrossBorder<span>Pay</span></h1>
+                </div>
+            </div>
+            
+            <div class="sidebar-section">
+                <label class="sidebar-label">Main Console</label>
+                <nav class="nav-menu">
+                    <a href="#" class="nav-item active" data-page="dashboard">
+                        <span class="icon">📊</span> Terminal Dashboard
+                    </a>
+                    <a href="#" class="nav-item" data-page="ledger">
+                        <span class="icon">📜</span> Blockchain Ledger
+                    </a>
+                </nav>
+            </div>
+
+            <div class="sidebar-section">
+                <label class="sidebar-label">Market Intelligence</label>
+                <div class="market-card">
+                    <div class="market-row">
+                        <span>ETH / USD</span>
+                        <strong id="eth-price-val">$2,450.21</strong>
+                    </div>
+                    <div class="market-row">
+                        <span>GAS PRICE</span>
+                        <strong id="gas-val">12 Gwei</strong>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <div class="sidebar-label-row">
+                    <label class="sidebar-label">Kernel Logs</label>
+                    <span class="status-pulse-mini"></span>
+                    <span class="live-tag">LIVE</span>
+                </div>
+                <div id="kernel-logs" class="kernel-logs">
+                    <p class="log-line log-system"><span class="log-time">[BOOT]</span> <span class="log-content">System core initialized. STANDBY.</span></p>
+                </div>
+            </div>
+
+            <div class="sidebar-footer">
+                <div class="node-info">
+                    <div class="status-indicator live"></div>
+                    <div class="node-details">
+                        <p class="node-title">Mainnet Cluster v1.2</p>
+                        <p class="node-status-text">Connection Optimized</p>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Workspace -->
+        <div class="workspace">
+            <header class="top-bar">
+                <div class="breadcrumb">
+                    <span class="root">Gateway</span> / <span id="page-title" class="current">Terminal Console</span>
+                </div>
+                <div class="header-tools">
+                    <div id="auth-header-actions" class="header-actions">
+                        <button id="switch-wallet" class="btn btn-secondary btn-sm hidden">Switch Account</button>
+                        <div class="network-chip">
+                            <span id="network-dot" class="dot"></span>
+                            <span id="network-display">Offline</span>
+                        </div>
+                    </div>
+                    <div class="user-id" id="top-user-display">
+                        <span class="icon">👤</span> 
+                        <span id="user-addr-short">Unauthenticated</span>
+                    </div>
+                </div>
+            </header>
+
+            <main class="content">
+                <!-- Page: Dashboard -->
+                <div id="page-dashboard" class="page-view animate-in">
+                    <section class="telemetry-row">
+                        <div class="telemetry-card balance">
+                            <div class="card-meta">
+                                <span class="card-icon">💎</span>
+                                <label>Chain Balance</label>
+                            </div>
+                            <h2 id="user-balance">0.000 <span>ETH</span></h2>
+                            <div class="trend-row">
+                                <span id="balance-usd">$0.00 USD</span>
+                            </div>
+                        </div>
+                        
+                        <div class="telemetry-card stats">
+                            <div class="card-meta">
+                                <span class="card-icon">🛰️</span>
+                                <label>Chain Telemetry</label>
+                            </div>
+                            <div class="stat-list">
+                                <div class="stat-item">
+                                    <span>Chain ID</span>
+                                    <strong id="chain-id">--</strong>
+                                </div>
+                                <div class="stat-item">
+                                    <span>Session TXs</span>
+                                    <strong id="tx-total">0</strong>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="telemetry-card cluster">
+                            <div class="card-meta">
+                                <span class="card-icon">🔗</span>
+                                <label>Integrity Sync</label>
+                            </div>
+                            <h2>100%</h2>
+                            <p>Global Node Cluster Status</p>
+                        </div>
+                    </section>
+
+                    <div class="main-grid">
+                        <!-- Module 1: Authentication Gateway -->
+                        <section class="module-card" id="auth-panel">
+                            <div class="module-header">
+                                <span class="module-tag">GATEWAY-01</span>
+                                <h3>Identity Verification</h3>
+                            </div>
+                            
+                            <div class="module-content">
+                                <div id="auth-unverified" class="auth-box">
+                                    <div class="secure-icon">🔐</div>
+                                    <h4>Handshake Required</h4>
+                                    <p>Establish a cryptographic link to the browser extension.</p>
+                                    <button id="connect-wallet" class="btn btn-primary btn-block">Initialize Secure Handshake</button>
+                                </div>
+
+                                <div id="auth-verified" class="auth-box hidden">
+                                    <div class="identity-badge">
+                                        <div class="identity-visual"></div>
+                                        <div class="identity-text">
+                                            <label>Session Identity</label>
+                                            <p id="full-address">0x000...0000</p>
+                                            <div class="auth-status-tags">
+                                                <span class="verified-tag">✓ VERIFIED</span>
+                                                <button id="disconnect-wallet" class="btn-link">Terminate Link</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="protocol-meta">
+                                        <div class="meta-item">
+                                            <span>Encryption</span>
+                                            <strong>Secure (EIP-1193)</strong>
+                                        </div>
+                                        <div class="meta-item">
+                                            <span>Status</span>
+                                            <strong>Session Active</strong>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+
+                        <!-- Module 2: Transaction Engine -->
+                        <section class="module-card">
+                            <div class="module-header">
+                                <span class="module-tag">ENGINE-02</span>
+                                <h3>Transaction Core</h3>
+                            </div>
+
+                            <div class="module-content">
+                                <form id="payment-form" class="engine-form">
+                                    <div class="field-group">
+                                        <label>Target Chain Node (Address)</label>
+                                        <div class="field-input">
+                                            <input type="text" id="recipient" placeholder="Recipient 0x..." required>
+                                        </div>
+                                    </div>
+                                    <div class="field-group">
+                                        <label>Payload (Value in ETH)</label>
+                                        <div class="field-input">
+                                            <input type="number" id="amount" step="0.0001" placeholder="0.00" required>
+                                            <span class="unit">ETH</span>
+                                        </div>
+                                    </div>
+                                    <button type="submit" id="send-payment" class="btn btn-dark btn-block" disabled>Broadcast Payload</button>
+                                </form>
+
+                                <div id="tx-loading" class="engine-overlay hidden">
+                                    <div class="processing-core">
+                                        <div class="spinner-core"></div>
+                                        <p id="loading-text">Broadcasting...</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+                    </div>
+                </div>
+
+                <!-- Page: Ledger -->
+                <div id="page-ledger" class="page-view hidden">
+                    <section class="ledger-card">
+                        <div class="ledger-header">
+                            <h3>Full Settlement Ledger</h3>
+                        </div>
+                        <div class="ledger-body">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>TX Hash</th>
+                                        <th>Timestamp</th>
+                                        <th>Target</th>
+                                        <th>Volume</th>
+                                        <th>Result</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tx-log-full">
+                                    <tr>
+                                        <td colspan="5" class="empty-data">Scanning nodes...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </section>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <div id="notification-area"></div>
+    <script type="module" src="main.js"></script>
+</body>
+</html>
