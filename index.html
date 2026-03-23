@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CrossBorderPay | Blockchain Portal v2.0</title>
+    <title>CrossBorderPay | Blockchain Portal v3.0</title>
+    <meta name="description" content="Blockchain-based cross-border payment system with smart contract routing, live currency conversion, and transparent fee structure.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -40,9 +41,31 @@
                         <strong id="eth-price-val">$2,450.21</strong>
                     </div>
                     <div class="market-row">
+                        <span>ETH / INR</span>
+                        <strong id="eth-inr-val">₹2,05,000</strong>
+                    </div>
+                    <div class="market-row">
                         <span>GAS PRICE</span>
                         <strong id="gas-val">12 Gwei</strong>
                     </div>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <label class="sidebar-label">Smart Contract</label>
+                <div class="market-card">
+                    <div class="market-row">
+                        <span>Mode</span>
+                        <strong id="sc-mode" class="sc-status-text">Direct Transfer</strong>
+                    </div>
+                    <div class="market-row">
+                        <span>Fee</span>
+                        <strong id="sc-fee">0.5%</strong>
+                    </div>
+                </div>
+                <div style="display: flex; gap: 8px; margin-top: 10px;">
+                    <button id="deploy-contract" class="btn btn-deploy hidden">🚀 Deploy Contract</button>
+                    <button id="revert-direct" class="btn btn-revert hidden" style="flex: 1; padding: 10px; background: transparent; color: var(--error); border: 1px solid var(--error); border-radius: 8px; font-weight: 600; font-size: 0.85rem; transition: var(--transition); cursor: pointer;">❌ Revert to Direct</button>
                 </div>
             </div>
 
@@ -61,7 +84,7 @@
                 <div class="node-info">
                     <div class="status-indicator live"></div>
                     <div class="node-details">
-                        <p class="node-title">Mainnet Cluster v1.2</p>
+                        <p class="node-title">Mainnet Cluster v3.0</p>
                         <p class="node-status-text">Connection Optimized</p>
                     </div>
                 </div>
@@ -173,11 +196,19 @@
                             </div>
                         </section>
 
-                        <!-- Module 2: Transaction Engine -->
+                        <!-- Module 2 + 3: Transaction Engine with Currency Conversion -->
                         <section class="module-card">
                             <div class="module-header">
-                                <span class="module-tag">ENGINE-02</span>
-                                <h3>Transaction Core</h3>
+                                <div class="module-header-top">
+                                    <div>
+                                        <span class="module-tag">ENGINE-02</span>
+                                        <h3>Transaction Core</h3>
+                                    </div>
+                                    <div class="contract-badge" id="contract-badge">
+                                        <span class="contract-dot"></span>
+                                        <span id="contract-badge-text">Direct Mode</span>
+                                    </div>
+                                </div>
                             </div>
 
                             <div class="module-content">
@@ -188,13 +219,69 @@
                                             <input type="text" id="recipient" placeholder="Recipient 0x..." required>
                                         </div>
                                     </div>
-                                    <div class="field-group">
-                                        <label>Payload (Value in ETH)</label>
-                                        <div class="field-input">
-                                            <input type="number" id="amount" step="0.0001" placeholder="0.00" required>
-                                            <span class="unit">ETH</span>
+
+                                    <div class="field-row">
+                                        <div class="field-group flex-1">
+                                            <label>Destination</label>
+                                            <div class="field-input">
+                                                <select id="dest-country">
+                                                    <option value="IN">India</option>
+                                                    <option value="US">United States</option>
+                                                    <option value="UK">United Kingdom</option>
+                                                    <option value="EU">Europe</option>
+                                                    <option value="JP">Japan</option>
+                                                    <option value="SG">Singapore</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div class="field-group flex-1">
+                                            <label>Currency</label>
+                                            <div class="field-input">
+                                                <select id="source-currency">
+                                                    <option value="inr">INR (₹)</option>
+                                                    <option value="usd">USD ($)</option>
+                                                    <option value="eur">EUR (€)</option>
+                                                    <option value="gbp">GBP (£)</option>
+                                                </select>
+                                            </div>
                                         </div>
                                     </div>
+
+                                    <div class="field-group">
+                                        <label>Amount</label>
+                                        <div class="field-input">
+                                            <input type="number" id="fiat-amount" step="0.01" min="0" placeholder="Enter amount" required>
+                                            <span class="unit" id="currency-unit">INR</span>
+                                        </div>
+                                    </div>
+
+                                    <!-- Module 3: Conversion Breakdown -->
+                                    <div id="conversion-display" class="conversion-card hidden">
+                                        <div class="conversion-header">
+                                            <span>💱</span>
+                                            <label>Conversion Breakdown</label>
+                                        </div>
+                                        <div class="conversion-body">
+                                            <div class="conv-row">
+                                                <span>Exchange Rate</span>
+                                                <strong id="conv-rate">--</strong>
+                                            </div>
+                                            <div class="conv-row">
+                                                <span>ETH Equivalent</span>
+                                                <strong id="conv-eth">--</strong>
+                                            </div>
+                                            <div class="conv-row fee-row">
+                                                <span>Platform Fee (0.5%)</span>
+                                                <strong id="conv-fee">--</strong>
+                                            </div>
+                                            <div class="conv-divider"></div>
+                                            <div class="conv-row total-row">
+                                                <span>Recipient Receives</span>
+                                                <strong id="conv-receives">--</strong>
+                                            </div>
+                                        </div>
+                                    </div>
+
                                     <button type="submit" id="send-payment" class="btn btn-dark btn-block" disabled>Broadcast Payload</button>
                                 </form>
 
@@ -214,21 +301,24 @@
                     <section class="ledger-card">
                         <div class="ledger-header">
                             <h3>Full Settlement Ledger</h3>
+                            <p class="ledger-subtitle" id="ledger-count">0 transactions recorded</p>
                         </div>
                         <div class="ledger-body">
                             <table class="data-table">
                                 <thead>
                                     <tr>
                                         <th>TX Hash</th>
-                                        <th>Timestamp</th>
+                                        <th>Date / Time</th>
                                         <th>Target</th>
-                                        <th>Volume</th>
+                                        <th>Fiat</th>
+                                        <th>ETH Volume</th>
+                                        <th>Fee</th>
                                         <th>Result</th>
                                     </tr>
                                 </thead>
                                 <tbody id="tx-log-full">
                                     <tr>
-                                        <td colspan="5" class="empty-data">Scanning nodes...</td>
+                                        <td colspan="7" class="empty-data">No settlements recorded yet.</td>
                                     </tr>
                                 </tbody>
                             </table>

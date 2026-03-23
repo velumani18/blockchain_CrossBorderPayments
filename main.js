@@ -1,99 +1,88 @@
-console.log('ANTIGRAVITY: KERNEL v2.1 LOADED');
+console.log('ANTIGRAVITY: KERNEL v3.0 LOADED');
 import { ethers } from 'ethers';
+import { CONTRACT_ABI, CONTRACT_ADDRESS, CONTRACT_BYTECODE } from './config.js';
 
-/**
- * Kernel State & Registry
- */
-let provider;
-let signer;
-let userAddress = null;
+/* ═══════════════════════════════════════════════════════════════════════
+   STATE & CONSTANTS
+   ═══════════════════════════════════════════════════════════════════════ */
+let provider, signer, userAddress, contract;
 let txCount = 0;
 let transactions = [];
+let ratesCache = { rates: null, lastFetch: 0 };
 
-// Registry for UI Elements (populated on DOM ready)
+const CACHE_DURATION  = 60000;  // 60 s rate cache
+const FEE_BPS         = 50;     // 0.5 % in basis points
+const MAX_STORED_TXS  = 100;
+const CURRENCY_SYMBOLS = { inr: '₹', usd: '$', eur: '€', gbp: '£' };
+const FALLBACK_RATES   = { inr: 205000, usd: 2450, eur: 2200, gbp: 1950 };
+
 const UI = {};
 
-/**
- * CORE LOGGING KERNEL
- */
+/* ═══════════════════════════════════════════════════════════════════════
+   MODULE 0 — CORE LOGGING
+   ═══════════════════════════════════════════════════════════════════════ */
 function pushLog(msg, type = 'system') {
-    const logsContainer = document.getElementById('kernel-logs');
-    if (!logsContainer) return;
-
+    const c = document.getElementById('kernel-logs');
+    if (!c) return;
     const p = document.createElement('p');
-    p.className = `log-line log-${type}`; // types: system, auth, engine, error
-    
-    const timestamp = new Date().toLocaleTimeString('en-US', { 
-        hour12: false, 
-        hour: '2-digit', 
-        minute: '2-digit', 
-        second: '2-digit' 
-    });
-    
-    p.innerHTML = `<span class="log-time">[${timestamp}]</span> <span class="log-content">${msg}</span>`;
-    
-    // Append to bottom (Terminal style)
-    logsContainer.appendChild(p);
-    
-    // Pruning old logs (keep last 50)
-    if (logsContainer.children.length > 50) {
-        logsContainer.removeChild(logsContainer.firstChild);
-    }
-
-    // Auto-scroll to latest
-    logsContainer.scrollTop = logsContainer.scrollHeight;
+    p.className = `log-line log-${type}`;
+    const ts = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    p.innerHTML = `<span class="log-time">[${ts}]</span> <span class="log-content">${msg}</span>`;
+    c.appendChild(p);
+    if (c.children.length > 50) c.removeChild(c.firstChild);
+    c.scrollTop = c.scrollHeight;
 }
 
-/**
- * MODULE 0: Navigation Controller
- */
+/* ═══════════════════════════════════════════════════════════════════════
+   MODULE 0 — NAVIGATION
+   ═══════════════════════════════════════════════════════════════════════ */
 function switchPage(pageId) {
-    const pages = document.querySelectorAll('.page-view');
-    const navItems = document.querySelectorAll('.nav-item');
-    
-    pages.forEach(p => p.classList.add('hidden'));
-    navItems.forEach(n => n.classList.remove('active'));
-    
-    const targetPage = document.getElementById(`page-${pageId}`);
-    const targetNav = document.querySelector(`[data-page="${pageId}"]`);
-    
-    if (targetPage) {
-        targetPage.classList.remove('hidden');
-        targetPage.classList.add('animate-in');
-        document.getElementById('page-title').textContent = pageId === 'dashboard' ? 'Terminal Console' : 'Settlement Ledger';
+    document.querySelectorAll('.page-view').forEach(p => p.classList.add('hidden'));
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    const page = document.getElementById(`page-${pageId}`);
+    const nav  = document.querySelector(`[data-page="${pageId}"]`);
+    if (page) {
+        page.classList.remove('hidden');
+        page.classList.add('animate-in');
+        document.getElementById('page-title').textContent =
+            pageId === 'dashboard' ? 'Terminal Console' : 'Settlement Ledger';
     }
-    
-    if (targetNav) targetNav.classList.add('active');
+    if (nav) nav.classList.add('active');
     pushLog(`Navigator: Routing to ${pageId.toUpperCase()} workspace.`, 'system');
 }
 window.switchPage = switchPage;
 
-/**
- * MODULE 1: Identity & Handshake Protocol
- */
+function bindNavigation() {
+    document.querySelectorAll('.nav-item').forEach(item => {
+        item.onclick = (e) => { e.preventDefault(); switchPage(item.getAttribute('data-page')); };
+    });
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   MODULE 1 — IDENTITY & HANDSHAKE PROTOCOL
+   ═══════════════════════════════════════════════════════════════════════ */
 async function initializeKernel() {
-    pushLog('Kernel: Initializing decentralized protocol kernel...', 'system');
-    
-    // 1. Map UI Registry immediately
-    UI.connectBtn = document.getElementById('connect-wallet');
-    UI.switchBtn = document.getElementById('switch-wallet');
-    UI.disconnectBtn = document.getElementById('disconnect-wallet');
+    pushLog('Kernel: Initializing decentralized protocol kernel v3.0...', 'system');
+
+    UI.connectBtn     = document.getElementById('connect-wallet');
+    UI.switchBtn      = document.getElementById('switch-wallet');
+    UI.disconnectBtn  = document.getElementById('disconnect-wallet');
     UI.authUnverified = document.getElementById('auth-unverified');
-    UI.authVerified = document.getElementById('auth-verified');
-    UI.fullAddress = document.getElementById('full-address');
-    UI.userAddrShort = document.getElementById('user-addr-short');
-    UI.networkDot = document.getElementById('network-dot');
+    UI.authVerified   = document.getElementById('auth-verified');
+    UI.fullAddress    = document.getElementById('full-address');
+    UI.userAddrShort  = document.getElementById('user-addr-short');
+    UI.networkDot     = document.getElementById('network-dot');
     UI.networkDisplay = document.getElementById('network-display');
-    
-    // 2. Start UI Systems regardless of wallet status
+
     startGlobalTelemetry();
     bindNavigation();
-    
+    bindConversionEvents();
+    updateContractBadge();
+
     pushLog('Kernel: Static telemetry pipeline active.', 'system');
 
-    // 3. Optional: Cryptographic Handshake Detection
     if (!window.ethereum) {
-        pushLog('Fatal: EIP-1193 Provider not detected. Dashboard restricted to Read-Only.', 'error');
+        pushLog('Fatal: EIP-1193 Provider not detected. Read-Only mode.', 'error');
         showNotification('MetaMask Extension Missing', 'error');
         return;
     }
@@ -101,72 +90,68 @@ async function initializeKernel() {
     try {
         provider = new ethers.BrowserProvider(window.ethereum);
         pushLog('Kernel: Ethereum Provider bound to browser instance.', 'system');
-        
-        // Background Session Detection
+
         const accounts = await provider.listAccounts();
         if (accounts.length > 0) {
             pushLog('Auth: Existing cryptographic session recovered.', 'auth');
-            syncIdentity(accounts.map(a => a.address));
+            await syncIdentity(accounts.map(a => a.address));
         }
 
-        // Live Event Pipeline
-        window.ethereum.on('accountsChanged', (accounts) => {
+        window.ethereum.on('accountsChanged', (accts) => {
             pushLog('Auth: External identity shift detected.', 'auth');
-            syncIdentity(accounts);
+            syncIdentity(accts);
         });
-        
         window.ethereum.on('chainChanged', () => {
-            pushLog('Kernel: Global chain ID shift. Rebooting protocol...', 'system');
+            pushLog('Kernel: Chain ID shift. Rebooting...', 'system');
             window.location.reload();
         });
-        
-        pushLog('Kernel: Handshake protocol STANDBY.', 'system');
 
+        pushLog('Kernel: Handshake protocol STANDBY.', 'system');
     } catch (e) {
-        pushLog(`Error: Protocol initialization failed: ${e.message}`, 'error');
+        pushLog(`Error: Init failed: ${e.message}`, 'error');
     }
 }
 
 async function startHandshake() {
     if (!window.ethereum) {
-        pushLog('Fatal: Handshake refused. EIP-1193 kernel layer missing.', 'error');
+        pushLog('Fatal: Handshake refused. EIP-1193 missing.', 'error');
         showNotification('Provider Missing', 'error');
         return;
     }
-    pushLog('Auth: Requiring forced cryptographic handshake...', 'auth');
+    pushLog('Auth: Requesting cryptographic handshake...', 'auth');
     try {
-        await window.ethereum.request({
-            method: 'wallet_requestPermissions',
-            params: [{ eth_accounts: {} }]
-        });
-        
+        await window.ethereum.request({ method: 'wallet_requestPermissions', params: [{ eth_accounts: {} }] });
         const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-        syncIdentity(accounts);
+        await syncIdentity(accounts);
     } catch (e) {
-        pushLog(`Auth: Handshake terminated by controller: ${e.message}`, 'error');
+        pushLog(`Auth: Handshake terminated: ${e.message}`, 'error');
         showNotification('Handshake Failed', 'error');
     }
 }
 
 async function syncIdentity(accounts) {
     if (!accounts || accounts.length === 0) {
-        userAddress = null;
-        signer = null;
+        userAddress = null; signer = null; contract = null;
+        transactions = []; txCount = 0;
         updateIdentityUI(false);
-        pushLog('Auth: Identity link DE-AUTHENTICATED.', 'auth');
-    } else {
-        userAddress = accounts[0];
-        try {
-            if (provider) {
-                signer = await provider.getSigner();
-                updateIdentityUI(true, userAddress);
-                pushLog(`Auth: Identity pulse verified: ${userAddress.substring(0, 12)}...`, 'auth');
-                showNotification('Identity Pulse: VERIFIED');
-                refreshTelemetry();
-            }
-        } catch (e) {
-            pushLog('Auth: Failed to establish signer on active identity.', 'error');
+        updateContractBadge();
+        pushLog('Auth: Identity DE-AUTHENTICATED.', 'auth');
+        return;
+    }
+    userAddress = accounts[0];
+    try {
+        if (provider) {
+            signer = await provider.getSigner();
+            initContract();
+            updateIdentityUI(true, userAddress);
+            pushLog(`Auth: Identity verified: ${userAddress.substring(0, 12)}...`, 'auth');
+            showNotification('Identity Pulse: VERIFIED');
+            loadTransactions();
+            renderHistory();
+            refreshTelemetry();
         }
+    } catch (e) {
+        pushLog('Auth: Failed to establish signer.', 'error');
     }
 }
 
@@ -191,123 +176,370 @@ function updateIdentityUI(active, addr) {
     }
 }
 
-/**
- * MODULE 2: Transaction Execution Engine
- */
-async function broadcastPayload(e) {
-    e.preventDefault();
+/* ═══════════════════════════════════════════════════════════════════════
+   MODULE 3 — CURRENCY CONVERSION & FEES
+   ═══════════════════════════════════════════════════════════════════════ */
+async function fetchRates() {
+    const now = Date.now();
+    if (ratesCache.rates && (now - ratesCache.lastFetch) < CACHE_DURATION) {
+        return ratesCache.rates;
+    }
+    try {
+        const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=inr,usd,eur,gbp');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (data.ethereum) {
+            ratesCache = { rates: data.ethereum, lastFetch: now };
+            pushLog('Conversion: Live exchange rates refreshed.', 'engine');
+            return data.ethereum;
+        }
+        throw new Error('Bad response');
+    } catch (e) {
+        pushLog(`Conversion: API unavailable — using fallback rates.`, 'error');
+        if (!ratesCache.rates) ratesCache = { rates: FALLBACK_RATES, lastFetch: now };
+        return ratesCache.rates;
+    }
+}
+
+function bindConversionEvents() {
+    const fiatInput    = document.getElementById('fiat-amount');
+    const currencySelect = document.getElementById('source-currency');
+
+    let debounceTimer;
+    const trigger = () => {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(updateConversion, 300);
+    };
+
+    fiatInput.addEventListener('input', trigger);
+    currencySelect.addEventListener('change', () => {
+        document.getElementById('currency-unit').textContent = currencySelect.value.toUpperCase();
+        trigger();
+    });
+}
+
+async function updateConversion() {
+    const fiatAmount = parseFloat(document.getElementById('fiat-amount').value);
+    const currency   = document.getElementById('source-currency').value;
+    const display    = document.getElementById('conversion-display');
+
+    if (!fiatAmount || fiatAmount <= 0) { display.classList.add('hidden'); return; }
+
+    const rates = await fetchRates();
+    const rate  = rates[currency];
+    if (!rate) { display.classList.add('hidden'); return; }
+
+    const sym         = CURRENCY_SYMBOLS[currency] || '';
+    const ethAmount   = fiatAmount / rate;
+    const useContract = !!contract;
+    const fee         = useContract ? (ethAmount * FEE_BPS) / 10000 : 0;
+    const receives    = ethAmount - fee;
+
+    document.getElementById('conv-rate').textContent     = `1 ETH = ${sym}${rate.toLocaleString()}`;
+    document.getElementById('conv-eth').textContent      = `${ethAmount.toFixed(6)} ETH`;
+    document.getElementById('conv-fee').textContent      = fee > 0 ? `${fee.toFixed(6)} ETH` : 'No fee (Direct)';
+    document.getElementById('conv-receives').textContent = `${receives.toFixed(6)} ETH`;
+
+    display.classList.remove('hidden');
+
+    // Update sidebar market rates
+    if (rates.usd) document.getElementById('eth-price-val').textContent = `$${rates.usd.toLocaleString()}`;
+    if (rates.inr) document.getElementById('eth-inr-val').textContent   = `₹${rates.inr.toLocaleString()}`;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   MODULE 5 — SMART CONTRACT INTEGRATION
+   ═══════════════════════════════════════════════════════════════════════ */
+function initContract() {
+    contract = null;
+    // Check localStorage for previously deployed contract
+    const savedAddr = localStorage.getItem('cbp_contract_address');
+    const addr = CONTRACT_ADDRESS || savedAddr || '';
+    if (addr && signer) {
+        try {
+            contract = new ethers.Contract(addr, CONTRACT_ABI, signer);
+            pushLog(`Contract: Interface bound to ${addr.substring(0, 14)}...`, 'engine');
+        } catch (e) {
+            pushLog(`Contract: Failed to bind — ${e.message}`, 'error');
+        }
+    }
+    updateContractBadge();
+}
+
+function updateContractBadge() {
+    const badge = document.getElementById('contract-badge');
+    const text  = document.getElementById('contract-badge-text');
+    const mode  = document.getElementById('sc-mode');
+    const fee   = document.getElementById('sc-fee');
+
+    if (contract) {
+        badge.classList.add('active');
+        text.textContent = 'Smart Contract';
+        mode.textContent = 'Contract Routed';
+        fee.textContent  = '0.5%';
+    } else {
+        badge.classList.remove('active');
+        text.textContent = 'Direct Mode';
+        mode.textContent = 'Direct Transfer';
+        fee.textContent  = '0% (Direct)';
+    }
+
+    // Show/hide deploy/revert buttons
+    const deployBtn = document.getElementById('deploy-contract');
+    const revertBtn = document.getElementById('revert-direct');
+    if (deployBtn) deployBtn.classList.toggle('hidden', !!contract || !signer);
+    if (revertBtn) revertBtn.classList.toggle('hidden', !contract || !signer);
+}
+
+function revertToDirect() {
+    localStorage.removeItem('cbp_contract_address');
+    contract = null;
+    updateContractBadge();
+    showNotification('Reverted to Direct Mode', 'info');
+    pushLog('Contract: Routing deactivated. Switching to standard wallet transfers.', 'system');
+}
+
+async function deployContract() {
     if (!signer) {
-        pushLog('Engine: Handshake required for broadcast.', 'error');
+        showNotification('Connect wallet first', 'error');
+        return;
+    }
+    if (contract) {
+        showNotification('Contract already deployed', 'info');
         return;
     }
 
-    const target = document.getElementById('recipient').value;
-    const value = document.getElementById('amount').value;
+    const deployBtn = document.getElementById('deploy-contract');
+    deployBtn.disabled = true;
+    deployBtn.textContent = '⏳ Deploying...';
+
+    try {
+        pushLog('Contract: Deploying smart contract via MetaMask...', 'engine');
+        showNotification('Confirm deployment in MetaMask');
+
+        const factory = new ethers.ContractFactory(CONTRACT_ABI, CONTRACT_BYTECODE, signer);
+        const deployed = await factory.deploy(50); // 50 basis points = 0.5% fee
+
+        pushLog(`Contract: TX sent. Waiting for confirmation...`, 'engine');
+        await deployed.waitForDeployment();
+
+        const address = await deployed.getAddress();
+        pushLog(`Contract: Deployed at ${address}`, 'engine');
+
+        // Save to localStorage so it persists
+        localStorage.setItem('cbp_contract_address', address);
+
+        // Activate the contract
+        contract = new ethers.Contract(address, CONTRACT_ABI, signer);
+        updateContractBadge();
+
+        showNotification('Smart Contract Deployed! ✓', 'success');
+        pushLog(`Contract: All payments will now route through smart contract.`, 'engine');
+    } catch (e) {
+        pushLog(`Contract: Deployment failed — ${e.message}`, 'error');
+        showNotification('Deployment failed', 'error');
+        deployBtn.disabled = false;
+        deployBtn.textContent = '🚀 Deploy Contract';
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   MODULE 2 — TRANSACTION EXECUTION ENGINE
+   ═══════════════════════════════════════════════════════════════════════ */
+async function broadcastPayload(e) {
+    e.preventDefault();
+    if (!signer) {
+        pushLog('Engine: Handshake required.', 'error');
+        showNotification('Connect wallet first', 'error');
+        return;
+    }
+
+    const target      = document.getElementById('recipient').value.trim();
+    const fiatAmount  = parseFloat(document.getElementById('fiat-amount').value);
+    const currency    = document.getElementById('source-currency').value;
+    const destCountry = document.getElementById('dest-country').value;
+
+    // ── Validate ──
+    if (!target || !fiatAmount || fiatAmount <= 0) {
+        showNotification('Fill all fields', 'error'); return;
+    }
+    if (!ethers.isAddress(target)) {
+        pushLog('Engine: Invalid Ethereum address.', 'error');
+        showNotification('Invalid Address Format', 'error'); return;
+    }
+
+    // ── Convert ──
+    const rates     = await fetchRates();
+    const rate      = rates[currency];
+    if (!rate) { showNotification('Rate unavailable', 'error'); return; }
+
+    const ethAmount = fiatAmount / rate;
+    const sym       = CURRENCY_SYMBOLS[currency] || '';
+    // Use 8 decimal places for parseEther precision
+    const ethStr    = ethAmount.toFixed(8);
 
     try {
         setEngineState(true, 'Injecting payload into decentralized mempool...');
-        pushLog(`Engine: Broadcasting ${value} ETH to target: ${target.substring(0, 12)}...`, 'engine');
-        
-        const tx = await signer.sendTransaction({
-            to: target,
-            value: ethers.parseEther(value)
-        });
+        pushLog(`Engine: Converting ${sym}${fiatAmount} → ${ethStr} ETH`, 'engine');
+
+        let tx;
+        if (contract) {
+            pushLog('Engine: Routing via smart contract...', 'engine');
+            tx = await contract.sendPayment(target, currency.toUpperCase(), destCountry, {
+                value: ethers.parseEther(ethStr)
+            });
+        } else {
+            pushLog('Engine: Direct transfer mode.', 'engine');
+            tx = await signer.sendTransaction({
+                to: target,
+                value: ethers.parseEther(ethStr)
+            });
+        }
 
         setEngineState(true, 'Awaiting settlement verification (Mining)...');
-        pushLog(`Engine: Payload injected. Hash: ${tx.hash.substring(0, 16)}...`, 'engine');
+        pushLog(`Engine: Hash: ${tx.hash.substring(0, 18)}...`, 'engine');
         showNotification('Payload Broadcasted');
 
         const receipt = await tx.wait();
-        
+
         if (receipt.status === 1) {
-            pushLog('Engine: Transaction settlement finalized.', 'engine');
+            pushLog('Engine: Settlement finalized. ✓', 'engine');
             showNotification('Settlement Verified', 'success');
-            
-            transactions.unshift({ 
-                hash: tx.hash, 
-                dest: target, 
-                value: value, 
-                time: new Date().toLocaleTimeString('en-US', { hour12: false }) 
+
+            const feeEth = contract ? (ethAmount * FEE_BPS / 10000) : 0;
+            const feeGwei = feeEth * 1e9; // 1 ETH = 1,000,000,000 Gwei
+
+            transactions.unshift({
+                hash:       tx.hash,
+                dest:       target,
+                ethValue:   ethStr,
+                fiatAmount: `${sym}${fiatAmount.toLocaleString()}`,
+                currency:   currency.toUpperCase(),
+                country:    destCountry,
+                fee:        feeGwei, // Now saving Gwei
+                time:       new Date().toLocaleTimeString('en-US', { hour12: false }),
+                date:       new Date().toLocaleDateString(),
+                viaContract: !!contract
             });
+
             renderHistory();
-            
+            saveTransactions();
             txCount++;
             document.getElementById('tx-total').textContent = txCount;
             document.getElementById('payment-form').reset();
+            document.getElementById('conversion-display').classList.add('hidden');
+            document.getElementById('currency-unit').textContent = 'INR';
             refreshTelemetry();
         }
-    } catch (e) {
-        pushLog(`Error: Engine fault: ${e.message}`, 'error');
-        showNotification(e.reason || 'Broadcast Refused', 'error');
+    } catch (err) {
+        pushLog(`Error: ${err.message}`, 'error');
+        showNotification(err.reason || 'Broadcast Refused', 'error');
     } finally {
         setEngineState(false);
     }
 }
 
-/**
- * UTILITY KERNEL
- */
-function bindNavigation() {
-    document.querySelectorAll('.nav-item').forEach(item => {
-        item.onclick = (e) => {
-            e.preventDefault();
-            switchPage(item.getAttribute('data-page'));
-        };
-    });
+/* ═══════════════════════════════════════════════════════════════════════
+   MODULE 4 — PERSISTENT TRANSACTION HISTORY
+   ═══════════════════════════════════════════════════════════════════════ */
+function saveTransactions() {
+    if (!userAddress) return;
+    try {
+        const key = `cbp_txs_${userAddress.toLowerCase()}`;
+        localStorage.setItem(key, JSON.stringify(transactions.slice(0, MAX_STORED_TXS)));
+        pushLog(`History: ${transactions.length} record(s) persisted to local vault.`, 'system');
+    } catch (e) {
+        pushLog('History: localStorage write failed.', 'error');
+    }
+}
+
+function loadTransactions() {
+    if (!userAddress) return;
+    try {
+        const key = `cbp_txs_${userAddress.toLowerCase()}`;
+        const stored = localStorage.getItem(key);
+        if (stored) {
+            transactions = JSON.parse(stored);
+            txCount = transactions.length;
+            document.getElementById('tx-total').textContent = txCount;
+            pushLog(`History: Loaded ${transactions.length} record(s) from local vault.`, 'system');
+        } else {
+            transactions = [];
+            txCount = 0;
+        }
+    } catch (e) {
+        transactions = [];
+        txCount = 0;
+        pushLog('History: Failed to parse stored data.', 'error');
+    }
 }
 
 function renderHistory() {
-    const list = document.getElementById('tx-log-full');
-    if (!list) return;
+    const tbody = document.getElementById('tx-log-full');
+    const countEl = document.getElementById('ledger-count');
+    if (!tbody) return;
 
-    if (transactions.length > 0) {
-        const empty = list.querySelector('.empty-data');
-        if (empty) empty.remove();
+    if (transactions.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="empty-data">No settlements recorded yet.</td></tr>';
+        if (countEl) countEl.textContent = '0 transactions recorded';
+        return;
     }
 
-    list.innerHTML = transactions.map(t => `
+    if (countEl) countEl.textContent = `${transactions.length} transaction(s) recorded`;
+
+    tbody.innerHTML = transactions.map(t => `
         <tr>
-            <td class="mono fs-11">${t.hash.substring(0, 16)}...</td>
-            <td>${t.time}</td>
-            <td class="mono fs-11">${t.dest.substring(0, 12)}...</td>
-            <td class="fw-800">${t.value} ETH</td>
+            <td class="mono fs-11">${t.hash.substring(0, 14)}...</td>
+            <td>${t.date || ''} ${t.time}</td>
+            <td class="mono fs-11">${t.dest.substring(0, 10)}...</td>
+            <td>${t.fiatAmount}</td>
+            <td class="fw-800">${t.ethValue} ETH</td>
+            <td class="${parseFloat(t.fee) > 0 ? 'fee-text' : ''}">${parseFloat(t.fee) > 0 ? parseFloat(t.fee).toLocaleString(undefined, {maximumFractionDigits: 2}) + ' Gwei' : '—'}</td>
             <td class="success-text">SETTLED ✓</td>
         </tr>
     `).join('');
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   UTILITY KERNEL
+   ═══════════════════════════════════════════════════════════════════════ */
 async function refreshTelemetry() {
     if (!userAddress || !provider) return;
     try {
         const balance = await provider.getBalance(userAddress);
         const eth = parseFloat(ethers.formatEther(balance));
         document.getElementById('user-balance').innerHTML = `${eth.toFixed(4)} <span>ETH</span>`;
-        document.getElementById('balance-usd').textContent = (eth * 2420.50).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+
+        const rates = await fetchRates();
+        const usdRate = rates.usd || 2450;
+        document.getElementById('balance-usd').textContent =
+            (eth * usdRate).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+
         const net = await provider.getNetwork();
         document.getElementById('chain-id').textContent = net.chainId.toString();
-    } catch (e) {}
+    } catch (e) { /* silent */ }
 }
 
 function startGlobalTelemetry() {
     pushLog('Telemetry: Handshaking with global node cluster...', 'system');
-    
-    // 1. UI Telemetry (Gas/Price)
+
+    // Simulated gas & price updates
     const updateStats = () => {
         const gas = Math.floor(Math.random() * (12 - 7 + 1)) + 7;
         const gasEl = document.getElementById('gas-val');
         if (gasEl) gasEl.textContent = `${gas} Gwei`;
-        
-        const ethPriceEl = document.getElementById('eth-price-val');
-        if (ethPriceEl) {
-            const ethBase = 2420.50 + (Math.random() * 4 - 2);
-            ethPriceEl.textContent = `$${ethBase.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
-        }
         setTimeout(updateStats, 12000);
     };
     updateStats();
 
-    // 2. Background Kernel Heartbeat
-    const kernelStatusMsgs = [
+    // Fetch real rates on startup
+    fetchRates().then(rates => {
+        if (rates.usd) document.getElementById('eth-price-val').textContent = `$${rates.usd.toLocaleString()}`;
+        if (rates.inr) document.getElementById('eth-inr-val').textContent   = `₹${rates.inr.toLocaleString()}`;
+    });
+
+    // Background heartbeat
+    const msgs = [
         "Network latency optimized: 42ms",
         "Shard #4 sync complete (EVM)",
         "Memory pool status: Stable",
@@ -318,19 +550,20 @@ function startGlobalTelemetry() {
         "Node Integrity: 100% Verified",
         "Mem-swap: Optimized 1.2GB"
     ];
-
-    const runHeartbeat = () => {
-        const randomMsg = kernelStatusMsgs[Math.floor(Math.random() * kernelStatusMsgs.length)];
-        pushLog(`System: ${randomMsg}`, 'system');
-        setTimeout(runHeartbeat, 5000 + Math.random() * 5000); // Varied interval for realism
+    const heartbeat = () => {
+        pushLog(`System: ${msgs[Math.floor(Math.random() * msgs.length)]}`, 'system');
+        setTimeout(heartbeat, 5000 + Math.random() * 5000);
     };
-    runHeartbeat();
+    heartbeat();
 }
 
 function setEngineState(loading, text) {
-    document.getElementById('tx-loading').classList.toggle('hidden', !loading);
-    document.getElementById('loading-text').textContent = text;
-    document.getElementById('send-payment').disabled = loading;
+    const overlay = document.getElementById('tx-loading');
+    const loadText = document.getElementById('loading-text');
+    const btn = document.getElementById('send-payment');
+    if (overlay) overlay.classList.toggle('hidden', !loading);
+    if (loadText && text) loadText.textContent = text;
+    if (btn) btn.disabled = loading;
 }
 
 function showNotification(msg, type = 'info') {
@@ -344,21 +577,26 @@ function showNotification(msg, type = 'info') {
     }, 5000);
 }
 
-// Global Event Handlers
+/* ═══════════════════════════════════════════════════════════════════════
+   BOOT SEQUENCE
+   ═══════════════════════════════════════════════════════════════════════ */
 document.addEventListener('DOMContentLoaded', () => {
     initializeKernel();
-    
-    // Explicit bindings to catch dynamic DOM ready
-    document.getElementById('connect-wallet').onclick = startHandshake;
-    document.getElementById('switch-wallet').onclick = startHandshake;
-    document.getElementById('disconnect-wallet').onclick = () => syncIdentity([]);
-    document.getElementById('payment-form').onsubmit = broadcastPayload;
 
-    // Real-time input logging
+    document.getElementById('connect-wallet').onclick    = startHandshake;
+    document.getElementById('switch-wallet').onclick     = startHandshake;
+    document.getElementById('disconnect-wallet').onclick = () => syncIdentity([]);
+    document.getElementById('payment-form').onsubmit     = broadcastPayload;
+    document.getElementById('deploy-contract').onclick   = deployContract;
+    
+    const revertBtn = document.getElementById('revert-direct');
+    if (revertBtn) revertBtn.onclick = revertToDirect;
+
+    // Input logging
     document.getElementById('recipient').oninput = (e) => {
         if (e.target.value.length === 2) pushLog('Buffer: Target node identification pending...', 'engine');
     };
-    document.getElementById('amount').oninput = (e) => {
-        if (e.target.value) pushLog(`Buffer: Volume parity check for ${e.target.value} ETH...`, 'engine');
+    document.getElementById('fiat-amount').oninput = (e) => {
+        if (e.target.value) pushLog(`Buffer: Volume parity check for ${e.target.value} ${document.getElementById('source-currency').value.toUpperCase()}...`, 'engine');
     };
 });
