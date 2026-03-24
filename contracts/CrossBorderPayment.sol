@@ -22,6 +22,7 @@ contract CrossBorderPayment {
         uint256 fee;
         uint256 timestamp;
         string  sourceCurrency;
+        string  sourceCountry;
         string  destCountry;
     }
 
@@ -36,6 +37,7 @@ contract CrossBorderPayment {
         uint256 amount,
         uint256 fee,
         string  sourceCurrency,
+        string  sourceCountry,
         string  destCountry,
         uint256 timestamp
     );
@@ -60,11 +62,13 @@ contract CrossBorderPayment {
      * @notice Send ETH to a receiver, deducting a platform fee.
      * @param _receiver       Recipient wallet address
      * @param _sourceCurrency Source fiat currency code (e.g. "INR")
-     * @param _destCountry    Destination country code (e.g. "IN")
+     * @param _sourceCountry  Sender's country code (e.g. "IN")
+     * @param _destCountry    Destination country code (e.g. "US")
      */
     function sendPayment(
         address payable _receiver,
         string calldata _sourceCurrency,
+        string calldata _sourceCountry,
         string calldata _destCountry
     ) external payable {
         // ── Checks ──
@@ -84,6 +88,7 @@ contract CrossBorderPayment {
             fee:            fee,
             timestamp:      block.timestamp,
             sourceCurrency: _sourceCurrency,
+            sourceCountry:  _sourceCountry,
             destCountry:    _destCountry
         }));
 
@@ -102,6 +107,7 @@ contract CrossBorderPayment {
             msg.value,
             fee,
             _sourceCurrency,
+            _sourceCountry,
             _destCountry,
             block.timestamp
         );

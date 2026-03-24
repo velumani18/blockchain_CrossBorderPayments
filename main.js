@@ -80,6 +80,7 @@ async function initializeKernel() {
     bindNavigation();
     bindConversionEvents();
     updateContractBadge();
+    detectAndSetCountry(); // Auto-detect sender's country on boot
 
     pushLog('Kernel: Static telemetry pipeline active.', 'system');
 
@@ -148,10 +149,25 @@ async function syncIdentity(accounts) {
             updateIdentityUI(true, userAddress);
             pushLog(`Auth: Identity verified: ${userAddress.substring(0, 12)}...`, 'auth');
             showNotification('Identity Pulse: VERIFIED');
+
+            // Click-to-copy wallet address
+            const fullAddrEl = document.getElementById('full-address');
+            const copyHint   = document.getElementById('copy-hint');
+            if (fullAddrEl) {
+                fullAddrEl.onclick = () => {
+                    navigator.clipboard.writeText(userAddress).then(() => {
+                        if (copyHint) { copyHint.style.display = 'inline'; setTimeout(() => { copyHint.style.display = 'none'; }, 2000); }
+                        pushLog('Auth: Wallet address copied to clipboard.', 'system');
+                    });
+                };
+            }
+
             loadTransactions();
             await loadOnChainTransactions();
             renderHistory();
             refreshTelemetry();
+            detectAndSetCountry();      // Re-run to tie country to wallet address in localStorage
+            checkNewReceivedPayments(); // Show banner if new payments arrived
         }
     } catch (e) {
         pushLog('Auth: Failed to establish signer.', 'error');
@@ -282,16 +298,21 @@ function updateContractBadge() {
         fee.textContent  = '0.5%';
     } else {
         badge.classList.remove('active');
-        text.textContent = 'Direct Mode';
-        mode.textContent = 'Direct Transfer';
-        fee.textContent  = '0% (Direct)';
+        text.textContent = 'No Contract';
+        mode.textContent = '⚠️ Deploy Required';
+        fee.textContent  = 'N/A';
     }
 
-    // Show/hide deploy/revert buttons
     const deployBtn = document.getElementById('deploy-contract');
     const revertBtn = document.getElementById('revert-direct');
+    // Only show deploy button when wallet is connected and no contract yet
     if (deployBtn) deployBtn.classList.toggle('hidden', !!contract || !signer);
-    if (revertBtn) revertBtn.classList.toggle('hidden', !contract || !signer);
+    // Hide revert button completely — direct mode is disabled
+    if (revertBtn) revertBtn.classList.add('hidden');
+
+    // Disable send button until contract is deployed
+    const sendBtn = document.getElementById('send-payment');
+    if (sendBtn && signer) sendBtn.disabled = !contract;
 }
 
 function revertToDirect() {
@@ -386,18 +407,19 @@ async function broadcastPayload(e) {
         pushLog(`Engine: Converting ${sym}${fiatAmount} → ${ethStr} ETH`, 'engine');
 
         let tx;
-        if (contract) {
-            pushLog('Engine: Routing via smart contract...', 'engine');
-            tx = await contract.sendPayment(target, currency.toUpperCase(), destCountry, {
-                value: ethers.parseEther(ethStr)
-            });
-        } else {
-            pushLog('Engine: Direct transfer mode.', 'engine');
-            tx = await signer.sendTransaction({
-                to: target,
-                value: ethers.parseEther(ethStr)
-            });
+        if (!contract) {
+            // This should never happen since we enforce contract deployment
+            pushLog('Engine: Smart Contract required. Please deploy the contract first.', 'error');
+            showNotification('Deploy the Smart Contract first!', 'error');
+            setEngineState(false);
+            return;
         }
+
+        const sourceCountry = document.getElementById('source-country').value;
+        pushLog('Engine: Routing via smart contract (permanent on-chain record)...', 'engine');
+        tx = await contract.sendPayment(target, currency.toUpperCase(), sourceCountry, destCountry, {
+            value: ethers.parseEther(ethStr)
+        });
 
         setEngineState(true, 'Awaiting settlement verification (Mining)...');
         pushLog(`Engine: Hash: ${tx.hash.substring(0, 18)}...`, 'engine');
@@ -413,16 +435,18 @@ async function broadcastPayload(e) {
             const feeGwei = feeEth * 1e9; // 1 ETH = 1,000,000,000 Gwei
 
             transactions.unshift({
-                hash:       tx.hash,
-                dest:       target,
-                ethValue:   ethStr,
-                fiatAmount: `${sym}${fiatAmount.toLocaleString()}`,
-                currency:   currency.toUpperCase(),
-                country:    destCountry,
-                fee:        feeGwei, // Now saving Gwei
-                time:       new Date().toLocaleTimeString('en-US', { hour12: false }),
-                date:       new Date().toLocaleDateString(),
-                viaContract: !!contract
+                hash:         tx.hash,
+                dest:         target,
+                sender:       userAddress,
+                ethValue:     ethStr,
+                fiatAmount:   `${sym}${fiatAmount.toLocaleString()}`,
+                currency:     currency.toUpperCase(),
+                sourceCountry: document.getElementById('source-country').value,
+                country:      destCountry,
+                fee:          feeGwei,
+                time:         new Date().toLocaleTimeString('en-US', { hour12: false }),
+                date:         new Date().toLocaleDateString(),
+                viaContract:  !!contract
             });
 
             renderHistory();
@@ -449,6 +473,7 @@ window.setLedgerTab = function(tab) {
     ledgerTab = tab;
     document.getElementById('tab-sent').style.background = tab === 'sent' ? 'var(--bg)' : 'transparent';
     document.getElementById('tab-received').style.background = tab === 'received' ? 'var(--bg)' : 'transparent';
+    if (tab === 'received') window.dismissReceivedBanner(); // Mark as seen when user opens received tab
     renderHistory();
 };
 
@@ -458,31 +483,49 @@ async function loadOnChainTransactions() {
         return;
     }
     try {
-        const ids = await contract.getUserPaymentIds(userAddress);
-        const fetched = [];
-        for (let i = 0; i < ids.length; i++) {
-            const p = await contract.getPayment(ids[i]);
-            const ethAmount = ethers.formatEther(p.amount);
-            const feeGwei = Number(ethers.formatUnits(p.fee, 'gwei'));
-            const pseudoHash = `0x${ids[i].toString(16).padStart(64, '0')}`;
-            const dateObj = new Date(Number(p.timestamp) * 1000);
-            fetched.push({
-                hash: pseudoHash,
-                sender: p.sender,
-                dest: p.receiver,
-                ethValue: parseFloat(ethAmount).toFixed(6),
-                fiatAmount: `— (${p.sourceCurrency})`,
-                currency: p.sourceCurrency,
-                country: p.destCountry,
-                fee: feeGwei,
-                time: dateObj.toLocaleTimeString('en-US', { hour12: false }),
-                date: dateObj.toLocaleDateString(),
-                viaContract: true
-            });
-        }
-        onChainTxs = fetched.reverse();
+        pushLog('Chain: Querying on-chain events via contract logs...', 'engine');
+        // Use event log queries to get REAL transaction hashes (not fake pseudo-hashes)
+        const sentFilter     = contract.filters.PaymentSent(null, userAddress, null);
+        const receivedFilter = contract.filters.PaymentSent(null, null, userAddress);
+
+        const [sentEvents, receivedEvents] = await Promise.all([
+            contract.queryFilter(sentFilter),
+            contract.queryFilter(receivedFilter)
+        ]);
+
+        const allEvents = [...sentEvents, ...receivedEvents];
+        // Deduplicate by real tx hash + paymentId
+        const uniqueEvents = Array.from(
+            new Map(allEvents.map(e => [e.transactionHash + e.args.paymentId.toString(), e])).values()
+        );
+
+        const fetched = uniqueEvents.map(event => {
+            const args      = event.args;
+            const ethAmount = ethers.formatEther(args.amount);
+            const feeGwei   = Number(ethers.formatUnits(args.fee, 'gwei'));
+            const dateObj   = new Date(Number(args.timestamp) * 1000);
+            return {
+                hash:          event.transactionHash,   // REAL Ethereum tx hash
+                paymentId:     args.paymentId.toString(),
+                sender:        args.sender,
+                dest:          args.receiver,
+                ethValue:      parseFloat(ethAmount).toFixed(6),
+                fiatAmount:    `\u2014 (${args.sourceCurrency})`,
+                currency:      args.sourceCurrency,
+                sourceCountry: args.sourceCountry || '\u2014',
+                country:       args.destCountry,
+                fee:           feeGwei,
+                time:          dateObj.toLocaleTimeString('en-US', { hour12: false }),
+                date:          dateObj.toLocaleDateString(),
+                viaContract:   true
+            };
+        });
+
+        onChainTxs = fetched.sort((a, b) => new Date(b.date + ' ' + b.time) - new Date(a.date + ' ' + a.time));
+        pushLog(`Chain: Loaded ${onChainTxs.length} on-chain transaction(s) with real TX hashes.`, 'engine');
     } catch(e) {
         console.error('Failed to fetch on-chain txs', e);
+        pushLog('Chain: Failed to query on-chain events.', 'error');
     }
 }
 
@@ -519,16 +562,16 @@ function loadTransactions() {
 }
 
 function renderHistory() {
-    const tbody = document.getElementById('tx-log-full');
+    const tbody   = document.getElementById('tx-log-full');
     const countEl = document.getElementById('ledger-count');
     if (!tbody) return;
 
     const directSent = transactions.filter(t => !t.viaContract);
-    const allTxs = [...directSent, ...onChainTxs];
-    
-    // Deduplicate pseudoHashes in case we reloaded before flushing memory
+    const allTxs     = [...directSent, ...onChainTxs];
+
+    // Deduplicate by real hash
     const uniqueTxs = Array.from(new Map(allTxs.map(item => [item.hash, item])).values());
-    uniqueTxs.sort((a,b) => new Date(b.date + ' ' + b.time) - new Date(a.date + ' ' + a.time));
+    uniqueTxs.sort((a, b) => new Date(b.date + ' ' + b.time) - new Date(a.date + ' ' + a.time));
 
     let filtered = [];
     if (ledgerTab === 'sent') {
@@ -538,25 +581,40 @@ function renderHistory() {
     }
 
     if (filtered.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="8" class="empty-data">No ${ledgerTab} settlements found.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="10" class="empty-data">No ${ledgerTab} settlements found.</td></tr>`;
         if (countEl) countEl.textContent = '0 transactions recorded';
         return;
     }
 
     if (countEl) countEl.textContent = `${filtered.length} transaction(s) recorded`;
 
-    tbody.innerHTML = filtered.map(t => `
+    const EXPLORER = 'https://sepolia.etherscan.io/tx/';
+    const shortAddr = (a) => a ? `${a.substring(0, 8)}...${a.slice(-4)}` : '—';
+    const copyTx = (hash) => { navigator.clipboard.writeText(hash); showNotification('TX Hash copied!', 'info'); };
+
+    tbody.innerHTML = filtered.map(t => {
+        const senderDisplay   = (t.sender   || userAddress);
+        const receiverDisplay = t.dest;
+        const feeDisplay = parseFloat(t.fee) > 0
+            ? `${parseFloat(t.fee).toLocaleString(undefined, { maximumFractionDigits: 2 })} Gwei`
+            : '—';
+        return `
         <tr>
-            <td class="mono fs-11">${t.hash.substring(0, 14)}...</td>
+            <td class="mono fs-11">
+                <a href="${EXPLORER}${t.hash}" target="_blank" rel="noopener" title="View on Sepolia Etherscan">${t.hash.substring(0, 12)}...</a>
+                <span onclick="navigator.clipboard.writeText('${t.hash}')" title="Copy full hash" style="cursor:pointer; margin-left:4px; opacity:0.6;">⎘</span>
+            </td>
             <td>${t.date || ''} ${t.time}</td>
-            <td><span class="status-pill ${ledgerTab==='sent'? 'out' : 'in'}" style="padding: 2px 6px; border-radius: 4px; background: ${ledgerTab==='sent'? 'var(--bg-secondary)' : 'var(--primary)'}; color: ${ledgerTab==='sent'? 'var(--text-secondary)' : 'white'}; font-size: 0.75rem;">${ledgerTab==='sent'? 'To' : 'From'}</span></td>
-            <td class="mono fs-11">${ledgerTab==='sent'? t.dest.substring(0, 10) : (t.sender || t.dest).substring(0, 10)}...</td>
+            <td class="mono fs-11" title="${senderDisplay}">${shortAddr(senderDisplay)}</td>
+            <td><span class="country-chip">${t.sourceCountry || '—'}</span></td>
+            <td class="mono fs-11" title="${receiverDisplay}">${shortAddr(receiverDisplay)}</td>
+            <td><span class="country-chip">${t.country || '—'}</span></td>
             <td>${t.fiatAmount}</td>
             <td class="fw-800">${t.ethValue} ETH</td>
-            <td class="${parseFloat(t.fee) > 0 ? 'fee-text' : ''}">${parseFloat(t.fee) > 0 ? parseFloat(t.fee).toLocaleString(undefined, {maximumFractionDigits: 2}) + ' Gwei' : '—'}</td>
+            <td class="${parseFloat(t.fee) > 0 ? 'fee-text' : ''}">${feeDisplay}</td>
             <td class="success-text">SETTLED ✓</td>
-        </tr>
-    `).join('');
+        </tr>`;
+    }).join('');
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -635,6 +693,145 @@ function showNotification(msg, type = 'info') {
         setTimeout(() => el.remove(), 400);
     }, 5000);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   MODULE 6 — GEO-DETECTION & RECEIVED PAYMENT NOTIFICATIONS
+   ═══════════════════════════════════════════════════════════════════════ */
+
+async function detectAndSetCountry() {
+    try {
+        const res  = await fetch('https://ipapi.co/json/');
+        if (!res.ok) throw new Error('API error');
+        const data = await res.json();
+        const code = data.country_code; // e.g. "IN"
+        const name = data.country_name; // e.g. "India"
+
+        // Persist tied to wallet address so receiver's country is also stored
+        if (userAddress) {
+            localStorage.setItem(`cbp_country_${userAddress.toLowerCase()}`, JSON.stringify({ code, name }));
+        }
+
+        // Auto-set the source-country dropdown
+        const sel = document.getElementById('source-country');
+        if (sel && code) {
+            const option = Array.from(sel.options).find(o => o.value === code);
+            if (option) {
+                sel.value = code;
+                const lbl = sel.closest('.field-group')?.querySelector('label');
+                if (lbl) lbl.innerHTML = `Source Country <span class="geo-tag">● AUTO-DETECTED</span>`;
+            }
+        }
+
+        // Show detected country badge in the identity panel
+        const badge = document.getElementById('user-country-display');
+        if (badge && name) badge.textContent = `📍 ${name}`;
+
+        pushLog(`Geo: Location resolved — ${name} (${code}).`, 'system');
+    } catch (e) {
+        pushLog('Geo: Country auto-detection unavailable. Please select manually.', 'error');
+    }
+}
+
+function checkNewReceivedPayments() {
+    if (!userAddress) return;
+    const key          = `cbp_last_seen_received_${userAddress.toLowerCase()}`;
+    const lastSeenStr  = localStorage.getItem(key);
+    const allTxs       = [...transactions, ...onChainTxs];
+    const receivedTxs  = allTxs.filter(t => t.dest && t.dest.toLowerCase() === userAddress.toLowerCase());
+    const currentCount = receivedTxs.length;
+
+    if (lastSeenStr === null) {
+        // First-ever login: set baseline silently, no banner shown
+        localStorage.setItem(key, currentCount.toString());
+        return;
+    }
+
+    const newCount = currentCount - parseInt(lastSeenStr, 10);
+    if (newCount > 0) {
+        showReceivedBanner(newCount, receivedTxs.slice(0, newCount));
+    }
+}
+
+function showReceivedBanner(count, newTxs) {
+    const banner = document.getElementById('received-banner');
+    if (!banner) return;
+    const latest   = newTxs[0];
+    const ethAmt   = latest ? `${latest.ethValue} ETH` : '';
+    const fromAddr = latest ? `${(latest.sender || latest.dest).substring(0, 10)}...` : '';
+    const detail   = count === 1
+        ? `${ethAmt} received from <span class="mono fs-11">${fromAddr}</span>`
+        : `${count} new incoming transactions need your attention.`;
+
+    banner.innerHTML = `
+        <div class="received-banner-inner">
+            <div class="banner-icon-wrap">💸</div>
+            <div class="banner-text">
+                <strong>You have ${count} new received payment${count > 1 ? 's' : ''}!</strong>
+                <span>${detail}</span>
+            </div>
+            <button class="banner-action" onclick="window.goToReceived()">View in Ledger →</button>
+            <button class="banner-dismiss" onclick="window.dismissReceivedBanner()">✕</button>
+        </div>
+    `;
+    banner.style.opacity = '0';
+    banner.style.transition = 'opacity 0.3s ease';
+    banner.classList.remove('hidden');
+    setTimeout(() => { banner.style.opacity = '1'; }, 50);
+    pushLog(`Inbox: ${count} new received payment(s) detected.`, 'auth');
+    showNotification(`💸 ${count} new payment${count > 1 ? 's' : ''} received!`, 'success');
+}
+
+window.goToReceived = function() {
+    switchPage('ledger');
+    window.setLedgerTab('received');
+};
+
+window.dismissReceivedBanner = function() {
+    const banner = document.getElementById('received-banner');
+    if (banner) {
+        banner.style.opacity = '0';
+        setTimeout(() => banner.classList.add('hidden'), 300);
+    }
+    if (!userAddress) return;
+    const key           = `cbp_last_seen_received_${userAddress.toLowerCase()}`;
+    const allTxs        = [...transactions, ...onChainTxs];
+    const totalReceived = allTxs.filter(t => t.dest && t.dest.toLowerCase() === userAddress.toLowerCase()).length;
+    localStorage.setItem(key, totalReceived.toString());
+};
+
+// ── Demo Mode: Manual country override for presentations ──────────────
+window.overrideCountry = function(value) {
+    if (!value) {
+        // Reset to auto-detect
+        detectAndSetCountry();
+        return;
+    }
+    const [code, name] = value.split('|');
+
+    // Update source-country dropdown
+    const sel = document.getElementById('source-country');
+    if (sel) {
+        const option = Array.from(sel.options).find(o => o.value === code);
+        if (option) {
+            sel.value = code;
+            const lbl = sel.closest('.field-group')?.querySelector('label');
+            if (lbl) lbl.innerHTML = `Source Country <span class="geo-tag">● DEMO OVERRIDE</span>`;
+        }
+    }
+
+    // Update identity badge
+    const badge = document.getElementById('user-country-display');
+    if (badge) badge.textContent = `📍 ${name} (Demo)`;
+
+    // Persist to localStorage
+    if (userAddress) {
+        localStorage.setItem(`cbp_country_${userAddress.toLowerCase()}`, JSON.stringify({ code, name }));
+    }
+
+    pushLog(`Demo: Country manually overridden to ${name} (${code}).`, 'auth');
+    showNotification(`Country set to ${name} for demo`, 'info');
+};
+
 
 /* ═══════════════════════════════════════════════════════════════════════
    BOOT SEQUENCE

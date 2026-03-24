@@ -88,7 +88,7 @@ body {
 .node-info { display: flex; align-items: center; gap: 12px; }
 .status-indicator { width: 8px; height: 8px; border-radius: 50%; background: var(--gray-medium); flex-shrink: 0; }
 .status-indicator.live { background: var(--success); box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.15); }
-.node-details { }
+
 .node-title { font-size: 12px; font-weight: 700; }
 .node-status-text { font-size: 11px; color: var(--gray-medium); }
 
@@ -194,6 +194,37 @@ body {
 .meta-item span { font-size: 10px; font-weight: 700; color: var(--gray-medium); display: block; }
 .meta-item strong { font-size: 12px; display: block; margin-top: 4px; }
 
+/* ── Demo Mode Override (Monochrome) ── */
+.demo-override-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    margin-top: 12px;
+    padding: 8px 12px;
+    background: #f8fafc;
+    border: 1px dashed #cbd5e1;
+    border-radius: 8px;
+    gap: 10px;
+}
+.demo-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: #475569;
+    white-space: nowrap;
+}
+.demo-override-row select {
+    font-size: 12px;
+    font-weight: 600;
+    border: none;
+    background: transparent;
+    color: #0f172a;
+    outline: none;
+    cursor: pointer;
+    flex: 1;
+}
+
+
 /* ── Form ── */
 .engine-form { flex: 1; display: flex; flex-direction: column; gap: 16px; }
 .field-group label { font-size: 12px; font-weight: 700; color: var(--gray-dark); margin-bottom: 6px; display: block; }
@@ -288,6 +319,154 @@ body {
     from { opacity: 0; transform: translateX(20px); }
     to   { opacity: 1; transform: translateX(0); }
 }
+
+/* ── Received Payments Banner (Monochrome) ── */
+.received-banner {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-left: 4px solid #0f172a;
+    border-radius: 14px;
+    margin-bottom: 24px;
+    overflow: hidden;
+    transition: opacity 0.3s ease;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+}
+.received-banner-inner {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 20px;
+}
+.banner-icon-wrap {
+    font-size: 28px;
+    flex-shrink: 0;
+    filter: grayscale(100%);
+}
+.banner-text {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.banner-text strong {
+    font-size: 14px;
+    font-weight: 800;
+    color: #0f172a;
+}
+.banner-text span {
+    font-size: 12px;
+    color: #475569;
+    font-weight: 500;
+}
+.banner-action {
+    background: #0f172a;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+}
+.banner-action:hover { background: #334155; transform: translateY(-1px); }
+.banner-dismiss {
+    background: transparent;
+    border: none;
+    color: #6b7280;
+    font-size: 16px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+    flex-shrink: 0;
+    transition: all 0.2s ease;
+}
+.banner-dismiss:hover { background: #f1f5f9; color: #0f172a; }
+
+/* ── Geo Auto-Detect Tag ── */
+.geo-tag {
+    font-size: 9px;
+    font-weight: 800;
+    color: #0f172a;
+    background: #f1f5f9;
+    padding: 2px 6px;
+    border-radius: 4px;
+    letter-spacing: 0.05em;
+    margin-left: 4px;
+    vertical-align: middle;
+}
+
+/* ── Country Chip (Monochrome) ── */
+.country-chip {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 99px;
+    font-size: 11px;
+    font-weight: 700;
+    background: #f8fafc;
+    color: #0f172a;
+    border: 1px solid #e2e8f0;
+    letter-spacing: 0.04em;
+}
+
+/* ── PPT Annotation Cards ── */
+.ppt-annotation {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin-top: 16px;
+    color: #e2e8f0;
+}
+.ppt-annotation strong {
+    display: block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: #38bdf8;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.ppt-annotation p, .ppt-annotation ul {
+    font-size: 12px;
+    line-height: 1.6;
+    margin: 0;
+}
+.ppt-annotation ul {
+    padding-left: 18px;
+}
+.ppt-annotation li {
+    margin-bottom: 4px;
+}
+.mt-3 { margin-top: 1rem; }
+.w-100 { width: 100%; }
+
+/* ── Ledger: TX hash links ── */
+.data-table a {
+    color: #2563eb;
+    text-decoration: none;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+}
+.data-table a:hover { text-decoration: underline; }
+
+/* ── Ledger: wider table scrollable ── */
+.ledger-body {
+    overflow-x: auto;
+}
+.data-table {
+    min-width: 900px;
+}
+
+/* ── Animate page transition ── */
+@keyframes animateIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.animate-in { animation: animateIn 0.25s ease-out; }
 
 /* ── Responsive ── */
 @media (max-width: 1100px) {
