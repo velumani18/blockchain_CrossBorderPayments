@@ -483,22 +483,48 @@ async function loadOnChainTransactions() {
         const paymentSentTopic = iface.getEvent("PaymentSent").topicHash;
         const paddedAddress = ethers.zeroPadValue(userAddress, 32);
 
-        // Fetch logs across ANY contract matching the event signature where user is sender
-        const sentLogsPromise = provider.getLogs({
-            fromBlock: 0,
-            toBlock: 'latest',
-            topics: [paymentSentTopic, null, paddedAddress, null]
-        }).catch(() => []);
+        // 1. If a local contract is deployed/saved, query it safely from block 0
+        const queryPromises = [];
+        if (typeof contract !== 'undefined' && contract && contract.target) {
+            queryPromises.push(provider.getLogs({
+                address: contract.target,
+                fromBlock: 0,
+                toBlock: 'latest',
+                topics: [paymentSentTopic, null, paddedAddress, null]
+            }).catch(() => []));
+            queryPromises.push(provider.getLogs({
+                address: contract.target,
+                fromBlock: 0,
+                toBlock: 'latest',
+                topics: [paymentSentTopic, null, null, paddedAddress]
+            }).catch(() => []));
+        }
 
-        // Fetch logs across ANY contract matching the event signature where user is receiver
-        const receivedLogsPromise = provider.getLogs({
-            fromBlock: 0,
-            toBlock: 'latest',
-            topics: [paymentSentTopic, null, null, paddedAddress]
-        }).catch(() => []);
+        // 2. Query ANY contract from the last ~9000 blocks, but split into safe RPC chunks of 1500
+        const currentBlock = await provider.getBlockNumber().catch(() => 0);
+        const CHUNK_SIZE = 1500;
+        const TARGET_BLOCKS = 9000;
+        const startBlock = Math.max(0, currentBlock - TARGET_BLOCKS);
 
-        const [sentLogs, receivedLogs] = await Promise.all([sentLogsPromise, receivedLogsPromise]);
-        const allLogs = [...sentLogs, ...receivedLogs];
+        for (let b = startBlock; b <= currentBlock; b += CHUNK_SIZE + 1) {
+            let endB = Math.min(b + CHUNK_SIZE, currentBlock);
+            if (b > endB) break;
+            
+            queryPromises.push(provider.getLogs({
+                fromBlock: b,
+                toBlock: endB,
+                topics: [paymentSentTopic, null, paddedAddress, null]
+            }).catch(() => []));
+            queryPromises.push(provider.getLogs({
+                fromBlock: b,
+                toBlock: endB,
+                topics: [paymentSentTopic, null, null, paddedAddress]
+            }).catch(() => []));
+        }
+
+        const logResults = await Promise.all(queryPromises);
+        let allLogs = [];
+        logResults.forEach(arr => { allLogs = allLogs.concat(arr); });
         
         // Deduplicate by real tx hash + paymentId (extracted from logs to be safe)
         const uniqueLogs = Array.from(
