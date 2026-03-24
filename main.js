@@ -8,6 +8,8 @@ import { CONTRACT_ABI, CONTRACT_ADDRESS, CONTRACT_BYTECODE } from './config.js';
 let provider, signer, userAddress, contract;
 let txCount = 0;
 let transactions = [];
+let onChainTxs = [];
+let ledgerTab = 'sent';
 let ratesCache = { rates: null, lastFetch: 0 };
 
 const CACHE_DURATION  = 60000;  // 60 s rate cache
@@ -147,6 +149,7 @@ async function syncIdentity(accounts) {
             pushLog(`Auth: Identity verified: ${userAddress.substring(0, 12)}...`, 'auth');
             showNotification('Identity Pulse: VERIFIED');
             loadTransactions();
+            await loadOnChainTransactions();
             renderHistory();
             refreshTelemetry();
         }
@@ -442,6 +445,47 @@ async function broadcastPayload(e) {
 /* ═══════════════════════════════════════════════════════════════════════
    MODULE 4 — PERSISTENT TRANSACTION HISTORY
    ═══════════════════════════════════════════════════════════════════════ */
+window.setLedgerTab = function(tab) {
+    ledgerTab = tab;
+    document.getElementById('tab-sent').style.background = tab === 'sent' ? 'var(--bg)' : 'transparent';
+    document.getElementById('tab-received').style.background = tab === 'received' ? 'var(--bg)' : 'transparent';
+    renderHistory();
+};
+
+async function loadOnChainTransactions() {
+    if (!contract || !userAddress) {
+        onChainTxs = [];
+        return;
+    }
+    try {
+        const ids = await contract.getUserPaymentIds(userAddress);
+        const fetched = [];
+        for (let i = 0; i < ids.length; i++) {
+            const p = await contract.getPayment(ids[i]);
+            const ethAmount = ethers.formatEther(p.amount);
+            const feeGwei = Number(ethers.formatUnits(p.fee, 'gwei'));
+            const pseudoHash = `0x${ids[i].toString(16).padStart(64, '0')}`;
+            const dateObj = new Date(Number(p.timestamp) * 1000);
+            fetched.push({
+                hash: pseudoHash,
+                sender: p.sender,
+                dest: p.receiver,
+                ethValue: parseFloat(ethAmount).toFixed(6),
+                fiatAmount: `— (${p.sourceCurrency})`,
+                currency: p.sourceCurrency,
+                country: p.destCountry,
+                fee: feeGwei,
+                time: dateObj.toLocaleTimeString('en-US', { hour12: false }),
+                date: dateObj.toLocaleDateString(),
+                viaContract: true
+            });
+        }
+        onChainTxs = fetched.reverse();
+    } catch(e) {
+        console.error('Failed to fetch on-chain txs', e);
+    }
+}
+
 function saveTransactions() {
     if (!userAddress) return;
     try {
@@ -479,19 +523,34 @@ function renderHistory() {
     const countEl = document.getElementById('ledger-count');
     if (!tbody) return;
 
-    if (transactions.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" class="empty-data">No settlements recorded yet.</td></tr>';
+    const directSent = transactions.filter(t => !t.viaContract);
+    const allTxs = [...directSent, ...onChainTxs];
+    
+    // Deduplicate pseudoHashes in case we reloaded before flushing memory
+    const uniqueTxs = Array.from(new Map(allTxs.map(item => [item.hash, item])).values());
+    uniqueTxs.sort((a,b) => new Date(b.date + ' ' + b.time) - new Date(a.date + ' ' + a.time));
+
+    let filtered = [];
+    if (ledgerTab === 'sent') {
+        filtered = uniqueTxs.filter(t => (t.sender || userAddress).toLowerCase() === userAddress.toLowerCase());
+    } else {
+        filtered = uniqueTxs.filter(t => t.dest.toLowerCase() === userAddress.toLowerCase());
+    }
+
+    if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" class="empty-data">No ${ledgerTab} settlements found.</td></tr>`;
         if (countEl) countEl.textContent = '0 transactions recorded';
         return;
     }
 
-    if (countEl) countEl.textContent = `${transactions.length} transaction(s) recorded`;
+    if (countEl) countEl.textContent = `${filtered.length} transaction(s) recorded`;
 
-    tbody.innerHTML = transactions.map(t => `
+    tbody.innerHTML = filtered.map(t => `
         <tr>
             <td class="mono fs-11">${t.hash.substring(0, 14)}...</td>
             <td>${t.date || ''} ${t.time}</td>
-            <td class="mono fs-11">${t.dest.substring(0, 10)}...</td>
+            <td><span class="status-pill ${ledgerTab==='sent'? 'out' : 'in'}" style="padding: 2px 6px; border-radius: 4px; background: ${ledgerTab==='sent'? 'var(--bg-secondary)' : 'var(--primary)'}; color: ${ledgerTab==='sent'? 'var(--text-secondary)' : 'white'}; font-size: 0.75rem;">${ledgerTab==='sent'? 'To' : 'From'}</span></td>
+            <td class="mono fs-11">${ledgerTab==='sent'? t.dest.substring(0, 10) : (t.sender || t.dest).substring(0, 10)}...</td>
             <td>${t.fiatAmount}</td>
             <td class="fw-800">${t.ethValue} ETH</td>
             <td class="${parseFloat(t.fee) > 0 ? 'fee-text' : ''}">${parseFloat(t.fee) > 0 ? parseFloat(t.fee).toLocaleString(undefined, {maximumFractionDigits: 2}) + ' Gwei' : '—'}</td>
@@ -584,6 +643,10 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeKernel();
 
     document.getElementById('connect-wallet').onclick    = startHandshake;
+    const tabSent = document.getElementById('tab-sent');
+    const tabReceived = document.getElementById('tab-received');
+    if (tabSent) tabSent.onclick = () => window.setLedgerTab('sent');
+    if (tabReceived) tabReceived.onclick = () => window.setLedgerTab('received');
     document.getElementById('switch-wallet').onclick     = startHandshake;
     document.getElementById('disconnect-wallet').onclick = () => syncIdentity([]);
     document.getElementById('payment-form').onsubmit     = broadcastPayload;

@@ -299,9 +299,17 @@
                 <!-- Page: Ledger -->
                 <div id="page-ledger" class="page-view hidden">
                     <section class="ledger-card">
-                        <div class="ledger-header">
-                            <h3>Full Settlement Ledger</h3>
-                            <p class="ledger-subtitle" id="ledger-count">0 transactions recorded</p>
+                        <div class="ledger-header" style="flex-direction: column; align-items: flex-start; gap: 1rem;">
+                            <div style="display: flex; justify-content: space-between; width: 100%; align-items: center;">
+                                <div>
+                                    <h3>Full Settlement Ledger</h3>
+                                    <p class="ledger-subtitle" id="ledger-count">0 transactions recorded</p>
+                                </div>
+                                <div class="ledger-tabs" style="display: flex; gap: 8px; background: var(--bg-secondary); padding: 4px; border-radius: 8px;">
+                                    <button id="tab-sent" class="btn btn-sm active" style="border-radius: 6px; border: none; padding: 6px 12px; cursor: pointer; background: var(--bg); font-weight: 600;">Sent</button>
+                                    <button id="tab-received" class="btn btn-sm" style="border-radius: 6px; border: none; padding: 6px 12px; cursor: pointer; background: transparent; font-weight: 600;">Received</button>
+                                </div>
+                            </div>
                         </div>
                         <div class="ledger-body">
                             <table class="data-table">
@@ -309,7 +317,8 @@
                                     <tr>
                                         <th>TX Hash</th>
                                         <th>Date / Time</th>
-                                        <th>Target</th>
+                                        <th>Direction</th>
+                                        <th>Address</th>
                                         <th>Fiat</th>
                                         <th>ETH Volume</th>
                                         <th>Fee</th>
@@ -318,7 +327,7 @@
                                 </thead>
                                 <tbody id="tx-log-full">
                                     <tr>
-                                        <td colspan="7" class="empty-data">No settlements recorded yet.</td>
+                                        <td colspan="8" class="empty-data">No settlements recorded yet.</td>
                                     </tr>
                                 </tbody>
                             </table>
