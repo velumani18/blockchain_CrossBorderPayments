@@ -473,34 +473,46 @@ window.setLedgerTab = function(tab) {
 };
 
 async function loadOnChainTransactions() {
-    if (!contract || !userAddress) {
+    if (!provider || !userAddress) {
         onChainTxs = [];
         return;
     }
     try {
-        pushLog('Chain: Querying on-chain events via contract logs...', 'engine');
-        // Use event log queries to get REAL transaction hashes (not fake pseudo-hashes)
-        const sentFilter     = contract.filters.PaymentSent(null, userAddress, null);
-        const receivedFilter = contract.filters.PaymentSent(null, null, userAddress);
+        pushLog('Chain: Querying on-chain events via global index logs...', 'engine');
+        const iface = new ethers.Interface(CONTRACT_ABI);
+        const paymentSentTopic = iface.getEvent("PaymentSent").topicHash;
+        const paddedAddress = ethers.zeroPadValue(userAddress, 32);
 
-        const [sentEvents, receivedEvents] = await Promise.all([
-            contract.queryFilter(sentFilter),
-            contract.queryFilter(receivedFilter)
-        ]);
+        // Fetch logs across ANY contract matching the event signature where user is sender
+        const sentLogsPromise = provider.getLogs({
+            fromBlock: 0,
+            toBlock: 'latest',
+            topics: [paymentSentTopic, null, paddedAddress, null]
+        }).catch(() => []);
 
-        const allEvents = [...sentEvents, ...receivedEvents];
-        // Deduplicate by real tx hash + paymentId
-        const uniqueEvents = Array.from(
-            new Map(allEvents.map(e => [e.transactionHash + e.args.paymentId.toString(), e])).values()
+        // Fetch logs across ANY contract matching the event signature where user is receiver
+        const receivedLogsPromise = provider.getLogs({
+            fromBlock: 0,
+            toBlock: 'latest',
+            topics: [paymentSentTopic, null, null, paddedAddress]
+        }).catch(() => []);
+
+        const [sentLogs, receivedLogs] = await Promise.all([sentLogsPromise, receivedLogsPromise]);
+        const allLogs = [...sentLogs, ...receivedLogs];
+        
+        // Deduplicate by real tx hash + paymentId (extracted from logs to be safe)
+        const uniqueLogs = Array.from(
+            new Map(allLogs.map(log => [log.transactionHash + log.topics[1], log])).values()
         );
 
-        const fetched = uniqueEvents.map(event => {
-            const args      = event.args;
+        const fetched = uniqueLogs.map(log => {
+            const parsed = iface.parseLog(log);
+            const args = parsed.args;
             const ethAmount = ethers.formatEther(args.amount);
             const feeGwei   = Number(ethers.formatUnits(args.fee, 'gwei'));
             const dateObj   = new Date(Number(args.timestamp) * 1000);
             return {
-                hash:          event.transactionHash,   // REAL Ethereum tx hash
+                hash:          log.transactionHash,
                 paymentId:     args.paymentId.toString(),
                 sender:        args.sender,
                 dest:          args.receiver,
@@ -517,10 +529,10 @@ async function loadOnChainTransactions() {
         });
 
         onChainTxs = fetched.sort((a, b) => new Date(b.date + ' ' + b.time) - new Date(a.date + ' ' + a.time));
-        pushLog(`Chain: Loaded ${onChainTxs.length} on-chain transaction(s) with real TX hashes.`, 'engine');
+        pushLog(`Chain: Loaded ${onChainTxs.length} on-chain transaction(s) from global index.`, 'engine');
     } catch(e) {
         console.error('Failed to fetch on-chain txs', e);
-        pushLog('Chain: Failed to query on-chain events.', 'error');
+        pushLog('Chain: Failed to query global on-chain events.', 'error');
     }
 }
 
@@ -593,6 +605,9 @@ function renderHistory() {
         const feeDisplay = parseFloat(t.fee) > 0
             ? `${parseFloat(t.fee).toLocaleString(undefined, { maximumFractionDigits: 2 })} Gwei`
             : '—';
+        
+        const toCountryDisplay = (ledgerTab === 'sent') ? 'Global' : (t.country || '—');
+
         return `
         <tr>
             <td class="mono fs-11">
@@ -603,7 +618,7 @@ function renderHistory() {
             <td class="mono fs-11" title="${senderDisplay}">${shortAddr(senderDisplay)}</td>
             <td><span class="country-chip">${t.sourceCountry || '—'}</span></td>
             <td class="mono fs-11" title="${receiverDisplay}">${shortAddr(receiverDisplay)}</td>
-            <td><span class="country-chip">${t.country || '—'}</span></td>
+            <td><span class="country-chip">${toCountryDisplay}</span></td>
             <td>${t.fiatAmount}</td>
             <td class="fw-800">${t.ethValue} ETH</td>
             <td class="${parseFloat(t.fee) > 0 ? 'fee-text' : ''}">${feeDisplay}</td>
