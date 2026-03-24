@@ -623,9 +623,17 @@ async function refreshTelemetry() {
         document.getElementById('user-balance').innerHTML = `${eth.toFixed(4)} <span>ETH</span>`;
 
         const rates = await fetchRates();
-        const usdRate = rates.usd || 2450;
+        const baseCurrencyToken = document.getElementById('source-currency')?.value || 'usd';
+        const rate = rates[baseCurrencyToken] || rates.usd || 2450;
+        
+        let currencyFormat = baseCurrencyToken.toUpperCase();
+        let locale = 'en-US';
+        if (baseCurrencyToken === 'inr') locale = 'en-IN';
+        if (baseCurrencyToken === 'eur') locale = 'de-DE';
+        if (baseCurrencyToken === 'gbp') locale = 'en-GB';
+
         document.getElementById('balance-usd').textContent =
-            (eth * usdRate).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+            (eth * rate).toLocaleString(locale, { style: 'currency', currency: currencyFormat });
 
         const net = await provider.getNetwork();
         document.getElementById('chain-id').textContent = net.chainId.toString();
@@ -731,6 +739,7 @@ async function detectAndSetCountry() {
             const curUnit = document.getElementById('currency-unit');
             if (curUnit) curUnit.textContent = curr.code.toUpperCase();
             if (typeof updateConversion === 'function') updateConversion();
+            if (typeof refreshTelemetry === 'function') refreshTelemetry();
         }
 
         // Show detected country badge in the identity panel
@@ -841,6 +850,7 @@ window.overrideCountry = function(value) {
         const curUnit = document.getElementById('currency-unit');
         if (curUnit) curUnit.textContent = curr.code.toUpperCase();
         if (typeof updateConversion === 'function') updateConversion();
+        if (typeof refreshTelemetry === 'function') refreshTelemetry();
     }
 
     // Update identity badge
