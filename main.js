@@ -745,11 +745,26 @@ function showNotification(msg, type = 'info') {
 
 async function detectAndSetCountry() {
     try {
-        const res  = await fetch('https://ipapi.co/json/');
-        if (!res.ok) throw new Error('API error');
-        const data = await res.json();
-        const code = data.country_code; // e.g. "IN"
-        const name = data.country_name; // e.g. "India"
+        let code = 'US';
+        let name = 'United States';
+        try {
+            const res = await fetch('https://ipapi.co/json/');
+            if (!res.ok) throw new Error('API limit');
+            const data = await res.json();
+            if (data.country_code) {
+                code = data.country_code;
+                name = data.country_name;
+            }
+        } catch (e1) {
+            const fb = await fetch('https://get.geojs.io/v1/ip/geo.json');
+            if (fb.ok) {
+                const fData = await fb.json();
+                if (fData.country_code) {
+                    code = fData.country_code;
+                    name = fData.country;
+                }
+            }
+        }
 
         // Persist tied to wallet address so receiver's country is also stored
         if (userAddress) {
