@@ -312,21 +312,20 @@ function updateContractBadge() {
         fee.textContent  = '0.5%';
     } else {
         badge.classList.remove('active');
-        text.textContent = 'No Contract';
-        mode.textContent = '⚠️ Deploy Required';
-        fee.textContent  = 'N/A';
+        text.textContent = 'Direct Mode';
+        mode.textContent = 'Direct Transfer';
+        fee.textContent  = '0% (Direct)';
     }
 
+    // Show deploy when wallet connected + no contract; show revert when contract is active
     const deployBtn = document.getElementById('deploy-contract');
     const revertBtn = document.getElementById('revert-direct');
-    // Only show deploy button when wallet is connected and no contract yet
     if (deployBtn) deployBtn.classList.toggle('hidden', !!contract || !signer);
-    // Hide revert button completely — direct mode is disabled
-    if (revertBtn) revertBtn.classList.add('hidden');
+    if (revertBtn) revertBtn.classList.toggle('hidden', !contract || !signer);
 
-    // Disable send button until contract is deployed
+    // Allow sending payments even in direct mode (no contract required)
     const sendBtn = document.getElementById('send-payment');
-    if (sendBtn && signer) sendBtn.disabled = !contract;
+    if (sendBtn && signer) sendBtn.disabled = false;
 }
 
 function revertToDirect() {
