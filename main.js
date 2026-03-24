@@ -1,6 +1,6 @@
 console.log('ANTIGRAVITY: KERNEL v3.0 LOADED');
 import { ethers } from 'ethers';
-import { CONTRACT_ABI, CONTRACT_ADDRESS, CONTRACT_BYTECODE } from './config.js';
+import { CONTRACT_ABI, CONTRACT_ADDRESS, CONTRACT_BYTECODE, SUPPORTED_TOKENS, ERC20_ABI } from './config.js';
 
 /* ═══════════════════════════════════════════════════════════════════════
    STATE & CONSTANTS
@@ -43,11 +43,25 @@ function switchPage(pageId) {
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
     const page = document.getElementById(`page-${pageId}`);
     const nav  = document.querySelector(`[data-page="${pageId}"]`);
+    const contentBox = document.querySelector('.content');
     if (page) {
         page.classList.remove('hidden');
         page.classList.add('animate-in');
-        document.getElementById('page-title').textContent =
-            pageId === 'dashboard' ? 'Terminal Console' : 'Settlement Ledger';
+        
+        let title = 'Terminal Console';
+        if (pageId === 'ledger') title = 'Settlement Ledger';
+        if (pageId === 'ide') title = 'Smart Contract Studio';
+        document.getElementById('page-title').textContent = title;
+        
+        if (pageId === 'ide') {
+            contentBox.classList.add('ide-active');
+            if (typeof window.initIDE === 'function') window.initIDE();
+            
+            // Re-layout monaco editor to fill the new space
+            setTimeout(() => { if (monacoEditor) monacoEditor.layout(); }, 50);
+        } else {
+            contentBox.classList.remove('ide-active');
+        }
     }
     if (nav) nav.classList.add('active');
     pushLog(`Navigator: Routing to ${pageId.toUpperCase()} workspace.`, 'system');
@@ -222,6 +236,10 @@ async function fetchRates() {
 
 function bindConversionEvents() {
     const fiatInput    = document.getElementById('fiat-amount');
+    const fiatInput      = document.getElementById('fiat-amount');
+    const currencySelect = document.getElementById('source-currency');
+    const assetSelect    = document.getElementById('transfer-asset');
+    const approveBtn     = document.getElementById('approve-token');
 
     let debounceTimer;
     const trigger = () => {
@@ -230,35 +248,84 @@ function bindConversionEvents() {
     };
 
     if (fiatInput) fiatInput.addEventListener('input', trigger);
+    fiatInput.addEventListener('input', trigger);
+    currencySelect.addEventListener('change', () => {
+        document.getElementById('currency-unit').textContent = currencySelect.value.toUpperCase();
+        trigger();
+    });
+    assetSelect.addEventListener('change', () => {
+        if (assetSelect.value === 'ETH' || !contract) {
+            approveBtn.classList.add('hidden');
+            document.getElementById('send-payment').disabled = !signer;
+        } else {
+            approveBtn.classList.remove('hidden');
+            approveBtn.disabled = false;
+            approveBtn.textContent = 'Approve Asset';
+            document.getElementById('send-payment').disabled = true;
+        }
+        trigger();
+    });
 }
 
 async function updateConversion() {
     const fiatAmount = parseFloat(document.getElementById('fiat-amount').value);
     const currency   = document.getElementById('source-currency').value;
+    const asset      = document.getElementById('transfer-asset').value;
     const display    = document.getElementById('conversion-display');
+
+    const rates = await fetchRates();
+    const rate  = rates[currency]; // FIAT to ETH rate
+    if (!rate) { display.classList.add('hidden'); return; }
+
+    const sym = CURRENCY_SYMBOLS[currency] || '';
+
+    // Update sidebar market rates dynamically based on selected fiat peg & execution asset
+    const primaryLabel = document.getElementById('market-primary-label');
+    const primaryVal = document.getElementById('market-primary-val');
+    const secLabel = document.getElementById('market-secondary-label');
+    const secVal = document.getElementById('market-secondary-val');
+
+    if (asset === 'ETH') {
+        if (primaryLabel) primaryLabel.textContent = `ETH / ${currency.toUpperCase()}`;
+        if (primaryVal) primaryVal.textContent = `${sym}${rates[currency].toLocaleString(undefined, {maximumFractionDigits: 2})}`;
+        
+        const otherCurrency = currency === 'usd' ? 'inr' : 'usd';
+        const otherSym = CURRENCY_SYMBOLS[otherCurrency];
+        if (secLabel) secLabel.textContent = `ETH / ${otherCurrency.toUpperCase()}`;
+        if (secVal) secVal.textContent = `${otherSym}${rates[otherCurrency].toLocaleString(undefined, {maximumFractionDigits: 2})}`;
+    } else {
+        // For Stablecoins pegged to USD
+        const fiatRate = rates[currency] / rates.usd; // fiat equivalent of 1 USD
+        if (primaryLabel) primaryLabel.textContent = `${asset} / USD`;
+        if (primaryVal) primaryVal.textContent = `$1.00`;
+        
+        if (secLabel) secLabel.textContent = `${asset} / ${currency.toUpperCase()}`;
+        if (secVal) secVal.textContent = `${sym}${fiatRate.toFixed(2)}`;
+    }
 
     if (!fiatAmount || fiatAmount <= 0) { display.classList.add('hidden'); return; }
 
-    const rates = await fetchRates();
-    const rate  = rates[currency];
-    if (!rate) { display.classList.add('hidden'); return; }
+    let cryptoAmount = 0;
 
-    const sym         = CURRENCY_SYMBOLS[currency] || '';
-    const ethAmount   = fiatAmount / rate;
+    // Stablecoin conversion (pegged to USD)
+    if (asset !== 'ETH') {
+        const usdRate = rates.usd;
+        const fiatPerUsd = rate / usdRate;
+        cryptoAmount = fiatAmount / fiatPerUsd;
+    } else {
+        cryptoAmount = fiatAmount / rate;
+    }
+
     const useContract = !!contract;
-    const fee         = useContract ? (ethAmount * FEE_BPS) / 10000 : 0;
-    const receives    = ethAmount - fee;
+    const fee         = useContract ? (cryptoAmount * FEE_BPS) / 10000 : 0;
+    const receives    = cryptoAmount - fee;
 
-    document.getElementById('conv-rate').textContent     = `1 ETH = ${sym}${rate.toLocaleString()}`;
-    document.getElementById('conv-eth').textContent      = `${ethAmount.toFixed(6)} ETH`;
-    document.getElementById('conv-fee').textContent      = fee > 0 ? `${fee.toFixed(6)} ETH` : 'No fee (Direct)';
-    document.getElementById('conv-receives').textContent = `${receives.toFixed(6)} ETH`;
+    document.getElementById('conv-rate').textContent     = asset === 'ETH' ? `1 ETH = ${sym}${rate.toLocaleString()}` : `1 ${asset} = ${sym}${(rate/rates.usd).toFixed(2)}`;
+    document.getElementById('conv-eth').textContent      = `${cryptoAmount.toFixed(6)} ${asset}`;
+    document.getElementById('conv-fee').textContent      = fee > 0 ? `${fee.toFixed(6)} ${asset}` : 'No fee (Direct)';
+    document.getElementById('conv-receives').textContent = `${receives.toFixed(6)} ${asset}`;
 
     display.classList.remove('hidden');
-
-    // Update sidebar market rates
-    if (rates.usd) document.getElementById('eth-price-val').textContent = `$${rates.usd.toLocaleString()}`;
-    if (rates.inr) document.getElementById('eth-inr-val').textContent   = `₹${rates.inr.toLocaleString()}`;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -285,29 +352,38 @@ function updateContractBadge() {
     const text  = document.getElementById('contract-badge-text');
     const mode  = document.getElementById('sc-mode');
     const fee   = document.getElementById('sc-fee');
+    const approveBtn = document.getElementById('approve-token');
+    const assetSelect = document.getElementById('transfer-asset');
 
     if (contract) {
         badge.classList.add('active');
         text.textContent = 'Smart Contract';
         mode.textContent = 'Contract Routed';
         fee.textContent  = '0.5%';
+        if (assetSelect && assetSelect.value !== 'ETH') {
+            if (approveBtn) approveBtn.classList.remove('hidden');
+        }
     } else {
         badge.classList.remove('active');
-        text.textContent = 'No Contract';
-        mode.textContent = '⚠️ Deploy Required';
-        fee.textContent  = 'N/A';
+        text.textContent = 'Direct Mode';
+        mode.textContent = 'Direct Transfer';
+        fee.textContent  = '0% (Direct)';
+        if (approveBtn) approveBtn.classList.add('hidden');
     }
 
+    // Show deploy when wallet connected + no contract; show revert when contract is active
     const deployBtn = document.getElementById('deploy-contract');
     const revertBtn = document.getElementById('revert-direct');
-    // Only show deploy button when wallet is connected and no contract yet
     if (deployBtn) deployBtn.classList.toggle('hidden', !!contract || !signer);
-    // Hide revert button completely — direct mode is disabled
-    if (revertBtn) revertBtn.classList.add('hidden');
+    if (revertBtn) revertBtn.classList.toggle('hidden', !contract || !signer);
 
-    // Disable send button until contract is deployed
+    // Allow sending payments even in direct mode
     const sendBtn = document.getElementById('send-payment');
-    if (sendBtn && signer) sendBtn.disabled = !contract;
+    if (contract && assetSelect && assetSelect.value !== 'ETH') {
+        if (sendBtn) sendBtn.disabled = true;
+    } else {
+        if (sendBtn && signer) sendBtn.disabled = false;
+    }
 }
 
 function revertToDirect() {
@@ -365,6 +441,67 @@ async function deployContract() {
 /* ═══════════════════════════════════════════════════════════════════════
    MODULE 2 — TRANSACTION EXECUTION ENGINE
    ═══════════════════════════════════════════════════════════════════════ */
+async function approveToken() {
+    if (!signer || !contract) {
+        showNotification('Connect wallet and deploy contract first', 'error');
+        return;
+    }
+    
+    const asset = document.getElementById('transfer-asset').value;
+    if (asset === 'ETH') return;
+
+    const tokenAddress = SUPPORTED_TOKENS[asset];
+    if (!tokenAddress) {
+        showNotification('Token not configured for this network', 'error');
+        return;
+    }
+
+    const fiatAmount = parseFloat(document.getElementById('fiat-amount').value);
+    const currency   = document.getElementById('source-currency').value;
+    if (!fiatAmount || fiatAmount <= 0) return;
+
+    const rates = await fetchRates();
+    const rate = rates[currency];
+    if (!rate) return;
+    
+    const usdRate = rates.usd;
+    const fiatPerUsd = rate / usdRate;
+    const cryptoAmount = fiatAmount / fiatPerUsd;
+
+    const btn = document.getElementById('approve-token');
+    btn.disabled = true;
+    btn.textContent = '⏳ Approving...';
+
+    try {
+        setEngineState(true, `Requesting allowance for ${asset}...`);
+        pushLog(`Token: Requesting approval from user...`, 'engine');
+        
+        const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
+        let decimals = 18;
+        try { decimals = Number(await tokenContract.decimals()); } catch(e) {}
+        
+        const amountWei = ethers.parseUnits(cryptoAmount.toFixed(Math.min(decimals, 6)), decimals);
+
+        const tx = await tokenContract.approve(await contract.getAddress(), amountWei);
+        pushLog(`Token: Approval TX sent. Hash: ${tx.hash.substring(0, 15)}...`, 'engine');
+        
+        await tx.wait();
+        
+        pushLog(`Token: Approval confirmed. ✓`, 'engine');
+        showNotification(`${asset} Approved! You can now send.`, 'success');
+        
+        document.getElementById('send-payment').disabled = false;
+        btn.textContent = '✓ Approved';
+    } catch (err) {
+        pushLog(`Token Error: ${err.message}`, 'error');
+        showNotification('Approval failed', 'error');
+        btn.disabled = false;
+        btn.textContent = 'Approve Asset';
+    } finally {
+        setEngineState(false);
+    }
+}
+
 async function broadcastPayload(e) {
     e.preventDefault();
     if (!signer) {
@@ -377,6 +514,8 @@ async function broadcastPayload(e) {
     const fiatAmount  = parseFloat(document.getElementById('fiat-amount').value);
     const currency    = document.getElementById('source-currency').value;
     const destCountry = 'Global'; // Removed dest-country dropdown
+    const destCountry = document.getElementById('dest-country').value;
+    const asset       = document.getElementById('transfer-asset').value;
 
     // ── Validate ──
     if (!target || !fiatAmount || fiatAmount <= 0) {
@@ -392,29 +531,64 @@ async function broadcastPayload(e) {
     const rate      = rates[currency];
     if (!rate) { showNotification('Rate unavailable', 'error'); return; }
 
-    const ethAmount = fiatAmount / rate;
     const sym       = CURRENCY_SYMBOLS[currency] || '';
-    // Use 8 decimal places for parseEther precision
-    const ethStr    = ethAmount.toFixed(8);
+    let strAmount   = '';
+    let isERC20     = asset !== 'ETH';
+    let decimals    = 18;
+
+    if (isERC20) {
+        const usdRate = rates.usd;
+        const fiatPerUsd = rate / usdRate;
+        const cryptoAmount = fiatAmount / fiatPerUsd;
+        
+        try {
+            const tokenContract = new ethers.Contract(SUPPORTED_TOKENS[asset], ERC20_ABI, signer);
+            decimals = Number(await tokenContract.decimals());
+        } catch(e) { decimals = 18; }
+        
+        strAmount = cryptoAmount.toFixed(Math.min(decimals, 6)); // ensure safe precision
+    } else {
+        const ethAmount = fiatAmount / rate;
+        strAmount = ethAmount.toFixed(8);
+    }
 
     try {
         setEngineState(true, 'Injecting payload into decentralized mempool...');
-        pushLog(`Engine: Converting ${sym}${fiatAmount} → ${ethStr} ETH`, 'engine');
+        pushLog(`Engine: Converting ${sym}${fiatAmount} → ${strAmount} ${asset}`, 'engine');
 
         let tx;
         if (!contract) {
-            // This should never happen since we enforce contract deployment
-            pushLog('Engine: Smart Contract required. Please deploy the contract first.', 'error');
-            showNotification('Deploy the Smart Contract first!', 'error');
-            setEngineState(false);
-            return;
-        }
+            pushLog(`Engine: Smart Contract missing. Initiating DIRECT P2P Transfer...`, 'engine');
+            if (isERC20) {
+                const amountWei = ethers.parseUnits(strAmount, decimals);
+                const tokenContract = new ethers.Contract(SUPPORTED_TOKENS[asset], ERC20_ABI, signer);
+                tx = await tokenContract.transfer(target, amountWei);
+            } else {
+                tx = await signer.sendTransaction({
+                    to: target,
+                    value: ethers.parseEther(strAmount)
+                });
+            }
+        } else {
+            const sourceCountry = document.getElementById('source-country').value;
+            pushLog(`Engine: Routing ${asset} via smart contract...`, 'engine');
 
-        const sourceCountry = document.getElementById('source-country').value;
-        pushLog('Engine: Routing via smart contract (permanent on-chain record)...', 'engine');
-        tx = await contract.sendPayment(target, currency.toUpperCase(), sourceCountry, destCountry, {
-            value: ethers.parseEther(ethStr)
-        });
+            if (isERC20) {
+                const amountWei = ethers.parseUnits(strAmount, decimals);
+                tx = await contract.sendTokenPayment(
+                    SUPPORTED_TOKENS[asset],
+                    target,
+                    amountWei,
+                    currency.toUpperCase(),
+                    sourceCountry,
+                    destCountry
+                );
+            } else {
+                tx = await contract.sendPayment(target, currency.toUpperCase(), sourceCountry, destCountry, {
+                    value: ethers.parseEther(strAmount)
+                });
+            }
+        }
 
         setEngineState(true, 'Awaiting settlement verification (Mining)...');
         pushLog(`Engine: Hash: ${tx.hash.substring(0, 18)}...`, 'engine');
@@ -426,19 +600,20 @@ async function broadcastPayload(e) {
             pushLog('Engine: Settlement finalized. ✓', 'engine');
             showNotification('Settlement Verified', 'success');
 
-            const feeEth = contract ? (ethAmount * FEE_BPS / 10000) : 0;
-            const feeGwei = feeEth * 1e9; // 1 ETH = 1,000,000,000 Gwei
+            const feeCrypto = contract ? (parseFloat(strAmount) * FEE_BPS / 10000) : 0;
+            const feeFormatted = isERC20 ? feeCrypto.toFixed(6) : (feeCrypto * 1e9).toFixed(2); // Gwei for ETH, tokens for ERC20
 
             transactions.unshift({
                 hash:         tx.hash,
                 dest:         target,
                 sender:       userAddress,
-                ethValue:     ethStr,
+                ethValue:     strAmount,
+                assetName:    asset,
                 fiatAmount:   `${sym}${fiatAmount.toLocaleString()}`,
                 currency:     currency.toUpperCase(),
                 sourceCountry: document.getElementById('source-country').value,
                 country:      destCountry,
-                fee:          feeGwei,
+                fee:          feeFormatted,
                 time:         new Date().toLocaleTimeString('en-US', { hour12: false }),
                 date:         new Date().toLocaleDateString(),
                 viaContract:  !!contract
@@ -451,6 +626,15 @@ async function broadcastPayload(e) {
             document.getElementById('payment-form').reset();
             document.getElementById('conversion-display').classList.add('hidden');
             document.getElementById('currency-unit').textContent = 'INR';
+            
+            // Reset approve states
+            const approveBtn = document.getElementById('approve-token');
+            if (approveBtn) {
+                approveBtn.disabled = false;
+                approveBtn.textContent = 'Approve Asset';
+            }
+            if (isERC20) document.getElementById('send-payment').disabled = true;
+
             refreshTelemetry();
         }
     } catch (err) {
@@ -628,8 +812,10 @@ function renderHistory() {
     tbody.innerHTML = filtered.map(t => {
         const senderDisplay   = (t.sender   || userAddress);
         const receiverDisplay = t.dest;
+        const assetStr = t.assetName || 'ETH';
+        const ethAmtDisplay = `${parseFloat(t.ethValue).toFixed(4)} ${assetStr}`;
         const feeDisplay = parseFloat(t.fee) > 0
-            ? `${parseFloat(t.fee).toLocaleString(undefined, { maximumFractionDigits: 2 })} Gwei`
+            ? (assetStr === 'ETH' ? `${parseFloat(t.fee).toLocaleString(undefined, { maximumFractionDigits: 2 })} Gwei` : `${parseFloat(t.fee).toFixed(3)} ${assetStr}`)
             : '—';
         
         const toCountryDisplay = (ledgerTab === 'sent') ? 'Global' : (t.country || '—');
@@ -647,7 +833,7 @@ function renderHistory() {
             <td class="mono fs-11" title="${receiverDisplay}">${shortAddr(receiverDisplay)}</td>
             <td><span class="country-chip">${toCountryDisplay}</span></td>
             <td>${t.fiatAmount}</td>
-            <td class="fw-800">${t.ethValue} ETH</td>
+            <td class="fw-800">${ethAmtDisplay}</td>
             <td class="${parseFloat(t.fee) > 0 ? 'fee-text' : ''}">${feeDisplay}</td>
             <td class="success-text">SETTLED ✓</td>
         </tr>`;
@@ -938,6 +1124,9 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('switch-wallet').onclick     = startHandshake;
     document.getElementById('disconnect-wallet').onclick = () => syncIdentity([]);
     document.getElementById('payment-form').onsubmit     = broadcastPayload;
+    const approveBtn = document.getElementById('approve-token');
+    if (approveBtn) approveBtn.onclick = approveToken;
+    
     document.getElementById('deploy-contract').onclick   = deployContract;
     
     const revertBtn = document.getElementById('revert-direct');
@@ -950,4 +1139,304 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('fiat-amount').oninput = (e) => {
         if (e.target.value) pushLog(`Buffer: Volume parity check for ${e.target.value} ${document.getElementById('source-currency').value.toUpperCase()}...`, 'engine');
     };
+
+    // Auto-fetch market intelligence on boot
+    updateConversion();
 });
+
+/* ═══════════════════════════════════════════════════════════════════════
+   MODULE 6 — IN-BROWSER SOLIDITY IDE & COMPILER
+   ═══════════════════════════════════════════════════════════════════════ */
+let monacoEditor = null;
+let compilerWorker = null;
+let customCompiledData = null;
+
+const defaultContractSource = `// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+/**
+ * @title CrossBorderPayment
+ * @dev Re-engineered for maximum security and compliance with
+ *      circuit breakers, volume limits, and address tracking.
+ */
+contract CrossBorderPayment {
+
+    // Roles
+    address public owner;
+    
+    // Core Parameters
+    uint256 public feePercentage; // Basis points (50 = 0.5%)
+    uint256 public totalFeesCollected;
+    
+    // Compliance Thresholds
+    uint256 public minTransactionAmount = 0.001 ether;
+    uint256 public maxTransactionAmount = 100 ether;
+    
+    // Circuit Breaker System
+    bool public isPaused;
+
+    // Entity Sanctions List
+    mapping(address => bool) public isBlacklisted;
+
+    struct Payment {
+        address sender;
+        address receiver;
+        uint256 amount;
+        uint256 fee;
+        uint256 timestamp;
+        string  sourceCurrency;
+        string  destCountry;
+    }
+
+    Payment[] public payments;
+    mapping(address => uint256[]) private userPaymentIds;
+
+    /* ─── EVENTS ─── */
+    event PaymentSent(uint256 indexed paymentId, address indexed sender, address indexed receiver, uint256 amount, uint256 fee, string sourceCurrency, string destCountry, uint256 timestamp);
+    event FeeWithdrawn(address indexed owner, uint256 amount);
+    event Paused(address account);
+    event Unpaused(address account);
+    event LimitsUpdated(uint256 minAmount, uint256 maxAmount);
+    event BlacklistUpdated(address indexed account, bool isListed);
+
+    /* ─── MODIFIERS ─── */
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Denied: System Administrator Root Required");
+        _;
+    }
+    
+    modifier whenNotPaused() {
+        require(!isPaused, "Circuit Breaker Active: Master contract is frozen");
+        _;
+    }
+
+    modifier notBlacklisted(address _account) {
+        require(!isBlacklisted[_account], "Sanctions Alert: Address is currently blacklisted");
+        _;
+    }
+
+    /* ─── CONSTRUCTOR ─── */
+    constructor(uint256 _feePercentage) {
+        require(_feePercentage <= 1000, "Maximum platform fee is 10%");
+        owner = msg.sender;
+        feePercentage = _feePercentage;
+    }
+
+    /* ─── ADMIN FUNCTIONS ─── */
+    function systemPanic() external onlyOwner {
+        isPaused = true;
+        emit Paused(msg.sender);
+    }
+    
+    function systemResume() external onlyOwner {
+        isPaused = false;
+        emit Unpaused(msg.sender);
+    }
+    
+    function configureThresholds(uint256 _min, uint256 _max) external onlyOwner {
+        require(_min < _max, "Constraint violation");
+        minTransactionAmount = _min;
+        maxTransactionAmount = _max;
+        emit LimitsUpdated(_min, _max);
+    }
+    
+    function setEntityStatus(address _account, bool _isBlacklisted) external onlyOwner {
+        isBlacklisted[_account] = _isBlacklisted;
+        emit BlacklistUpdated(_account, _isBlacklisted);
+    }
+
+    /* ─── CORE PIPELINE ─── */
+    function sendPayment(address payable _receiver, string calldata _sourceCurrency, string calldata _destCountry) 
+        external payable whenNotPaused notBlacklisted(msg.sender) notBlacklisted(_receiver) 
+    {
+        // ── Security Constraints ──
+        require(msg.value >= minTransactionAmount, "Volume too low");
+        require(msg.value <= maxTransactionAmount, "Volume exceeded capacity");
+        require(_receiver != address(0), "Null destination");
+        require(_receiver != msg.sender, "Loopback forbidden");
+
+        uint256 fee = (msg.value * feePercentage) / 10000;
+        uint256 transferAmount = msg.value - fee;
+
+        // ── State Mutators ──
+        uint256 paymentId = payments.length;
+        payments.push(Payment({
+            sender: msg.sender, receiver: _receiver, amount: msg.value, fee: fee,
+            timestamp: block.timestamp, sourceCurrency: _sourceCurrency, destCountry: _destCountry
+        }));
+
+        userPaymentIds[msg.sender].push(paymentId);
+        userPaymentIds[_receiver].push(paymentId);
+        totalFeesCollected += fee;
+
+        // ── I/O Interactions ──
+        (bool success, ) = _receiver.call{value: transferAmount}("");
+        require(success, "Settlement failed structurally");
+
+        emit PaymentSent(paymentId, msg.sender, _receiver, msg.value, fee, _sourceCurrency, _destCountry, block.timestamp);
+    }
+
+    function withdrawFees() external onlyOwner {
+        uint256 balance = address(this).balance;
+        require(balance > 0, "Treasury empty");
+        (bool success, ) = payable(owner).call{value: balance}("");
+        require(success, "Withdrawal execution fault");
+        emit FeeWithdrawn(owner, balance);
+    }
+
+    /* ─── VIEW ─── */
+    function getPaymentCount() external view returns (uint256) { return payments.length; }
+    function getUserPaymentIds(address _user) external view returns (uint256[] memory) { return userPaymentIds[_user]; }
+    function getPayment(uint256 _id) external view returns (Payment memory) {
+        require(_id < payments.length, "Orphaned pointer");
+        return payments[_id];
+    }
+}
+`;
+
+function logCompiler(msg, type = 'system') {
+    const consoleDiv = document.getElementById('compiler-console');
+    if (!consoleDiv) return;
+    const p = document.createElement('div');
+    p.className = `console-line ${type}`;
+    const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
+    p.textContent = `[${ts}] ${msg}`;
+    consoleDiv.appendChild(p);
+    consoleDiv.scrollTop = consoleDiv.scrollHeight;
+    pushLog(`Compiler: ${msg}`, 'system');
+}
+
+window.initIDE = function() {
+    if (monacoEditor) return; // Prevent multiple re-inits
+
+    if (window.require) {
+        require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs' }});
+        require(['vs/editor/editor.main'], function() {
+            monacoEditor = monaco.editor.create(document.getElementById('monaco-container'), {
+                value: defaultContractSource,
+                language: 'sol',
+                theme: 'vs-dark',
+                automaticLayout: true,
+                minimap: { enabled: true },
+                fontSize: 15,
+                lineHeight: 24,
+                fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+                fontLigatures: true,
+                padding: { top: 16 },
+                scrollBeyondLastLine: false,
+                renderLineHighlight: 'all',
+                cursorBlinking: 'smooth',
+                cursorSmoothCaretAnimation: 'on',
+                smoothScrolling: true,
+                bracketPairColorization: { enabled: true },
+                wordWrap: 'off',
+                tabSize: 4,
+            });
+            logCompiler('IDE engine loaded. Editor ready.', 'success');
+
+            // Re-layout after a small delay to ensure container is sized
+            setTimeout(() => { monacoEditor.layout(); }, 100);
+        });
+    } else {
+        logCompiler('Could not load IDE resources.', 'error');
+    }
+
+    // Initialize Web Worker
+    if (window.Worker && !compilerWorker) {
+        compilerWorker = new Worker('/compiler.worker.js');
+        compilerWorker.onmessage = function(e) {
+            const { type, payload, error } = e.data;
+            const overlay = document.getElementById('ide-overlay');
+            const statusEl = document.getElementById('ide-status');
+
+            overlay.classList.remove('active');
+
+            if (type === 'WORKER_READY') {
+                logCompiler('Solidity compiler loaded in background.', 'success');
+                if (statusEl) statusEl.querySelector('span:last-child').textContent = 'Ready';
+            } else if (type === 'COMPILED') {
+                logCompiler(`Build Successful: ${payload.contractName}`, 'success');
+                logCompiler(`Bytecode: ${payload.bytecode.length} chars`, 'system');
+                logCompiler(`ABI: ${payload.abi.length} entries`, 'system');
+                customCompiledData = payload;
+                const deployBtn = document.getElementById('deploy-custom-btn');
+                deployBtn.disabled = false;
+                deployBtn.innerHTML = '<span>🚀</span> Deploy ' + payload.contractName;
+                if (statusEl) statusEl.querySelector('span:last-child').textContent = 'Compiled ✓';
+                showNotification('Compilation Successful', 'success');
+            } else if (type === 'ERROR') {
+                logCompiler(`Compilation Failed:\n${error}`, 'error');
+                if (statusEl) statusEl.querySelector('span:last-child').textContent = 'Error';
+                showNotification('Compiler Error', 'error');
+            }
+        };
+    }
+
+    // Bind Compile Button
+    document.getElementById('compile-btn').onclick = () => {
+        if (!monacoEditor || !compilerWorker) return;
+        const sourceCode = monacoEditor.getValue();
+        if (!sourceCode.trim()) {
+            logCompiler('Abort: No source code.', 'error');
+            return;
+        }
+        document.getElementById('ide-overlay').classList.add('active');
+        document.getElementById('deploy-custom-btn').disabled = true;
+        const statusEl = document.getElementById('ide-status');
+        if (statusEl) statusEl.querySelector('span:last-child').textContent = 'Compiling...';
+        logCompiler('Sending source to solc compiler...', 'system');
+        compilerWorker.postMessage({ id: Date.now(), type: 'COMPILE', payload: { sourceCode } });
+    };
+
+    // Bind Deploy Button
+    document.getElementById('deploy-custom-btn').onclick = async () => {
+        if (!customCompiledData || !signer) {
+            showNotification('Wallet connection required for deployment', 'error');
+            return;
+        }
+        
+        const deployBtn = document.getElementById('deploy-custom-btn');
+        const origHTML = deployBtn.innerHTML;
+        deployBtn.disabled = true;
+        deployBtn.innerHTML = '<span>⏳</span> Deploying...';
+
+        try {
+            logCompiler('Requesting MetaMask signature...', 'system');
+            showNotification('Confirm deployment in MetaMask');
+
+            const factory = new ethers.ContractFactory(customCompiledData.abi, customCompiledData.bytecode, signer);
+            const deployed = await factory.deploy(50); 
+            
+            logCompiler('Transaction submitted. Mining...', 'system');
+            await deployed.waitForDeployment();
+            
+            const address = await deployed.getAddress();
+            logCompiler(`Deployed at ${address}`, 'success');
+            
+            localStorage.setItem('cbp_contract_address', address);
+            
+            logCompiler('Contract active. Reloading...', 'success');
+            showNotification('Contract Deployed Successfully', 'success');
+            
+            setTimeout(() => { window.location.reload(); }, 2000);
+            
+        } catch (err) {
+            logCompiler(`Deploy failed: ${err.message}`, 'error');
+            deployBtn.disabled = false;
+            deployBtn.innerHTML = origHTML;
+        }
+    };
+
+    // Console toggle
+    const toggleBtn = document.getElementById('toggle-console');
+    if (toggleBtn) {
+        toggleBtn.onclick = () => {
+            const console = document.getElementById('compiler-console');
+            console.classList.toggle('collapsed');
+            toggleBtn.textContent = console.classList.contains('collapsed') ? '▸' : '▾';
+            // Re-layout monaco to fill freed space
+            setTimeout(() => { if (monacoEditor) monacoEditor.layout(); }, 50);
+        };
+    }
+};
+

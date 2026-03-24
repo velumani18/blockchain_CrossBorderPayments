@@ -88,7 +88,7 @@ body {
 .node-info { display: flex; align-items: center; gap: 12px; }
 .status-indicator { width: 8px; height: 8px; border-radius: 50%; background: var(--gray-medium); flex-shrink: 0; }
 .status-indicator.live { background: var(--success); box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.15); }
-
+.node-details { }
 .node-title { font-size: 12px; font-weight: 700; }
 .node-status-text { font-size: 11px; color: var(--gray-medium); }
 
@@ -194,37 +194,6 @@ body {
 .meta-item span { font-size: 10px; font-weight: 700; color: var(--gray-medium); display: block; }
 .meta-item strong { font-size: 12px; display: block; margin-top: 4px; }
 
-/* ── Demo Mode Override (Monochrome) ── */
-.demo-override-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    width: 100%;
-    margin-top: 12px;
-    padding: 8px 12px;
-    background: #f8fafc;
-    border: 1px dashed #cbd5e1;
-    border-radius: 8px;
-    gap: 10px;
-}
-.demo-label {
-    font-size: 11px;
-    font-weight: 700;
-    color: #475569;
-    white-space: nowrap;
-}
-.demo-override-row select {
-    font-size: 12px;
-    font-weight: 600;
-    border: none;
-    background: transparent;
-    color: #0f172a;
-    outline: none;
-    cursor: pointer;
-    flex: 1;
-}
-
-
 /* ── Form ── */
 .engine-form { flex: 1; display: flex; flex-direction: column; gap: 16px; }
 .field-group label { font-size: 12px; font-weight: 700; color: var(--gray-dark); margin-bottom: 6px; display: block; }
@@ -320,153 +289,217 @@ body {
     to   { opacity: 1; transform: translateX(0); }
 }
 
-/* ── Received Payments Banner (Monochrome) ── */
-.received-banner {
-    background: #fff;
-    border: 1px solid #e2e8f0;
-    border-left: 4px solid #0f172a;
-    border-radius: 14px;
-    margin-bottom: 24px;
+/* ── IDE Studio ── */
+.content.ide-active {
+    padding: 0;
+    max-width: 100%;
+    height: calc(100vh - var(--header-height));
     overflow: hidden;
-    transition: opacity 0.3s ease;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
 }
-.received-banner-inner {
+
+#page-ide {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+/* Toolbar */
+.ide-toolbar {
     display: flex;
     align-items: center;
-    gap: 16px;
-    padding: 16px 20px;
-}
-.banner-icon-wrap {
-    font-size: 28px;
+    justify-content: space-between;
+    padding: 10px 20px;
+    background: #1e1e2e;
+    border-bottom: 1px solid #313244;
     flex-shrink: 0;
-    filter: grayscale(100%);
 }
-.banner-text {
+.ide-toolbar-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.ide-logo {
+    font-size: 22px;
+    color: #89b4fa;
+    line-height: 1;
+}
+.ide-toolbar-info h3 {
+    font-size: 14px;
+    font-weight: 700;
+    color: #cdd6f4;
+    margin: 0;
+    line-height: 1.2;
+}
+.ide-toolbar-sub {
+    font-size: 11px;
+    color: #6c7086;
+    font-weight: 500;
+}
+.ide-toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.ide-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #a6adc8;
+    padding: 6px 12px;
+    border-radius: 6px;
+    background: #181825;
+}
+.ide-status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #a6e3a1;
+    box-shadow: 0 0 6px rgba(166, 227, 161, 0.4);
+}
+
+/* IDE Buttons */
+.ide-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 16px;
+    border: none;
+    border-radius: 8px;
+    font-size: 12.5px;
+    font-weight: 700;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.ide-btn-compile {
+    background: #313244;
+    color: #cdd6f4;
+}
+.ide-btn-compile:hover {
+    background: #45475a;
+}
+.ide-btn-deploy {
+    background: linear-gradient(135deg, #89b4fa, #74c7ec);
+    color: #1e1e2e;
+}
+.ide-btn-deploy:hover {
+    filter: brightness(1.1);
+    transform: translateY(-1px);
+}
+.ide-btn-deploy:disabled {
+    background: #313244;
+    color: #585b70;
+    cursor: not-allowed;
+    transform: none;
+    filter: none;
+}
+
+/* IDE Body */
+.ide-body {
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    position: relative;
+    overflow: hidden;
+    background: #1e1e1e;
 }
-.banner-text strong {
-    font-size: 14px;
-    font-weight: 800;
-    color: #0f172a;
-}
-.banner-text span {
-    font-size: 12px;
-    color: #475569;
-    font-weight: 500;
-}
-.banner-action {
-    background: #0f172a;
-    color: #fff;
-    border: none;
-    border-radius: 8px;
-    padding: 8px 16px;
-    font-size: 13px;
-    font-weight: 700;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: all 0.2s ease;
-    flex-shrink: 0;
-}
-.banner-action:hover { background: #334155; transform: translateY(-1px); }
-.banner-dismiss {
-    background: transparent;
-    border: none;
-    color: #6b7280;
-    font-size: 16px;
-    cursor: pointer;
-    padding: 4px 8px;
-    border-radius: 6px;
-    flex-shrink: 0;
-    transition: all 0.2s ease;
-}
-.banner-dismiss:hover { background: #f1f5f9; color: #0f172a; }
 
-/* ── Geo Auto-Detect Tag ── */
-.geo-tag {
-    font-size: 9px;
+/* Editor fills remaining space */
+.ide-editor {
+    flex: 1;
+    min-height: 0;
+}
+
+/* Console Wrapper */
+.ide-console-wrapper {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    background: #11111b;
+    border-top: 2px solid #313244;
+}
+.ide-console-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 16px;
+    background: #181825;
+    border-bottom: 1px solid #313244;
+}
+.ide-console-title {
+    font-size: 10px;
     font-weight: 800;
-    color: #0f172a;
-    background: #f1f5f9;
+    letter-spacing: 0.08em;
+    color: #89b4fa;
+    font-family: 'JetBrains Mono', monospace;
+}
+.ide-console-toggle {
+    background: none;
+    border: none;
+    color: #6c7086;
+    font-size: 14px;
+    cursor: pointer;
     padding: 2px 6px;
     border-radius: 4px;
-    letter-spacing: 0.05em;
-    margin-left: 4px;
-    vertical-align: middle;
+    transition: background 0.15s;
 }
-
-/* ── Country Chip (Monochrome) ── */
-.country-chip {
-    display: inline-block;
-    padding: 3px 10px;
-    border-radius: 99px;
-    font-size: 11px;
-    font-weight: 700;
-    background: #f8fafc;
-    color: #0f172a;
-    border: 1px solid #e2e8f0;
-    letter-spacing: 0.04em;
+.ide-console-toggle:hover {
+    background: #313244;
+    color: #cdd6f4;
 }
-
-/* ── PPT Annotation Cards ── */
-.ppt-annotation {
-    background: #1e293b;
-    border: 1px solid #334155;
-    border-radius: 8px;
-    padding: 14px 18px;
-    margin-top: 16px;
-    color: #e2e8f0;
-}
-.ppt-annotation strong {
-    display: block;
+.compiler-console {
+    height: 140px;
+    overflow-y: auto;
+    padding: 10px 16px;
     font-family: 'JetBrains Mono', monospace;
     font-size: 12px;
-    color: #38bdf8;
-    margin-bottom: 8px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    color: #a6adc8;
+    scrollbar-width: thin;
+    scrollbar-color: #45475a #11111b;
 }
-.ppt-annotation p, .ppt-annotation ul {
-    font-size: 12px;
+.compiler-console.collapsed {
+    height: 0;
+    padding: 0 16px;
+    overflow: hidden;
+}
+.compiler-console::-webkit-scrollbar { width: 6px; }
+.compiler-console::-webkit-scrollbar-track { background: #11111b; }
+.compiler-console::-webkit-scrollbar-thumb { background: #45475a; border-radius: 3px; }
+.console-line {
+    margin-bottom: 3px;
+    white-space: pre-wrap;
+    font-family: 'JetBrains Mono', monospace;
     line-height: 1.6;
-    margin: 0;
 }
-.ppt-annotation ul {
-    padding-left: 18px;
-}
-.ppt-annotation li {
-    margin-bottom: 4px;
-}
-.mt-3 { margin-top: 1rem; }
-.w-100 { width: 100%; }
+.console-line.system { color: #89b4fa; }
+.console-line.error { color: #f38ba8; }
+.console-line.success { color: #a6e3a1; }
 
-/* ── Ledger: TX hash links ── */
-.data-table a {
-    color: #2563eb;
-    text-decoration: none;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
+/* Compilation Overlay */
+.ide-overlay {
+    display: none;
+    position: absolute;
+    inset: 0;
+    background: rgba(17, 17, 27, 0.85);
+    backdrop-filter: blur(4px);
+    align-items: center;
+    justify-content: center;
+    z-index: 20;
+}
+.ide-overlay.active {
+    display: flex;
+}
+.ide-overlay-content {
+    text-align: center;
+}
+.ide-overlay-content p {
+    color: #cdd6f4;
     font-weight: 600;
+    font-size: 14px;
+    margin-top: 12px;
 }
-.data-table a:hover { text-decoration: underline; }
-
-/* ── Ledger: wider table scrollable ── */
-.ledger-body {
-    overflow-x: auto;
-}
-.data-table {
-    min-width: 900px;
-}
-
-/* ── Animate page transition ── */
-@keyframes animateIn {
-    from { opacity: 0; transform: translateY(8px); }
-    to   { opacity: 1; transform: translateY(0); }
-}
-.animate-in { animation: animateIn 0.25s ease-out; }
 
 /* ── Responsive ── */
 @media (max-width: 1100px) {

@@ -27,6 +27,9 @@
                     <a href="#" class="nav-item active" data-page="dashboard">
                         <span class="icon">📊</span> Terminal Dashboard
                     </a>
+                    <a href="#" class="nav-item" data-page="ide">
+                        <span class="icon">💻</span> Smart Contract Studio
+                    </a>
                     <a href="#" class="nav-item" data-page="ledger">
                         <span class="icon">📜</span> Blockchain Ledger
                     </a>
@@ -37,12 +40,12 @@
                 <label class="sidebar-label">Market Intelligence</label>
                 <div class="market-card">
                     <div class="market-row">
-                        <span>ETH / USD</span>
-                        <strong id="eth-price-val">$2,450.21</strong>
+                        <span id="market-primary-label">ETH / USD</span>
+                        <strong id="market-primary-val">--</strong>
                     </div>
                     <div class="market-row">
-                        <span>ETH / INR</span>
-                        <strong id="eth-inr-val">₹2,05,000</strong>
+                        <span id="market-secondary-label">ETH / INR</span>
+                        <strong id="market-secondary-val">--</strong>
                     </div>
                     <div class="market-row">
                         <span>GAS PRICE</span>
@@ -256,6 +259,30 @@
                                             </div>
                                         </div>
                                     </div>
+                                    <div class="field-row">
+                                        <div class="field-group flex-1">
+                                            <label>Execution Asset</label>
+                                            <div class="field-input">
+                                                <select id="transfer-asset">
+                                                    <option value="ETH">Ethereum (ETH)</option>
+                                                    <option value="USDC">USDC (Testnet)</option>
+                                                    <option value="USDT">USDT (Testnet)</option>
+                                                    <option value="DAI">DAI (Testnet)</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div class="field-group flex-1">
+                                            <label>Fiat Peg</label>
+                                            <div class="field-input">
+                                                <select id="source-currency">
+                                                    <option value="inr">INR (₹)</option>
+                                                    <option value="usd">USD ($)</option>
+                                                    <option value="eur">EUR (€)</option>
+                                                    <option value="gbp">GBP (£)</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
 
                                     <div class="field-group">
                                         <label>Amount</label>
@@ -292,7 +319,10 @@
                                         </div>
                                     </div>
 
-                                    <button type="submit" id="send-payment" class="btn btn-dark btn-block" disabled>Broadcast Payload</button>
+                                    <div style="display: flex; gap: 10px; margin-top: 20px;">
+                                        <button type="button" id="approve-token" class="btn btn-primary hidden" style="flex:1;">Approve Token</button>
+                                        <button type="submit" id="send-payment" class="btn btn-dark" style="flex:2;" disabled>Broadcast Payload</button>
+                                    </div>
                                 </form>
 
                                 <div id="tx-loading" class="engine-overlay hidden">
@@ -303,6 +333,57 @@
                                 </div>
                             </div>
                         </section>
+                    </div>
+                </div>
+
+                <!-- Page: Smart Contract IDE -->
+                <div id="page-ide" class="page-view hidden">
+                    <!-- IDE Toolbar -->
+                    <div class="ide-toolbar">
+                        <div class="ide-toolbar-left">
+                            <span class="ide-logo">⬡</span>
+                            <div class="ide-toolbar-info">
+                                <h3>Solidity IDE</h3>
+                                <span class="ide-toolbar-sub">Smart Contract Studio · In-Browser Compiler</span>
+                            </div>
+                        </div>
+                        <div class="ide-toolbar-right">
+                            <div class="ide-status" id="ide-status">
+                                <span class="ide-status-dot"></span>
+                                <span>Ready</span>
+                            </div>
+                            <button id="compile-btn" class="ide-btn ide-btn-compile">
+                                <span>⚙️</span> Compile
+                            </button>
+                            <button id="deploy-custom-btn" class="ide-btn ide-btn-deploy" disabled>
+                                <span>🚀</span> Deploy
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- IDE Body -->
+                    <div class="ide-body">
+                        <!-- Monaco Editor -->
+                        <div id="monaco-container" class="ide-editor"></div>
+
+                        <!-- Resizable Console -->
+                        <div class="ide-console-wrapper">
+                            <div class="ide-console-header">
+                                <span class="ide-console-title">▸ COMPILER OUTPUT</span>
+                                <button class="ide-console-toggle" id="toggle-console" title="Toggle console">▾</button>
+                            </div>
+                            <div class="compiler-console" id="compiler-console">
+                                <div class="console-line system">[System] Solidity compiler ready. Write code and click Compile.</div>
+                            </div>
+                        </div>
+
+                        <!-- Compilation Overlay -->
+                        <div id="ide-overlay" class="ide-overlay">
+                            <div class="ide-overlay-content">
+                                <div class="spinner-core"></div>
+                                <p>Compiling Smart Contract...</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -351,6 +432,7 @@
     </div>
 
     <div id="notification-area"></div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/loader.min.js"></script>
     <script type="module" src="main.js"></script>
 </body>
 </html>
