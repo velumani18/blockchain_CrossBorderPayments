@@ -157,6 +157,9 @@
                         </div>
                     </section>
 
+                    <!-- New Received Payments Banner -->
+                    <div id="received-banner" class="received-banner hidden"></div>
+
                     <div class="main-grid">
                         <!-- Module 1: Authentication Gateway -->
                         <section class="module-card" id="auth-panel">
@@ -178,9 +181,11 @@
                                         <div class="identity-visual"></div>
                                         <div class="identity-text">
                                             <label>Session Identity</label>
-                                            <p id="full-address">0x000...0000</p>
+                                            <p id="full-address" title="Click to copy" style="cursor:pointer;">0x000...0000</p>
+                                            <span id="copy-hint" style="font-size:0.7rem; color: var(--success); display:none;">✓ Copied!</span>
                                             <div class="auth-status-tags">
                                                 <span class="verified-tag">✓ VERIFIED</span>
+                                                <span id="user-country-display" class="country-chip"></span>
                                                 <button id="disconnect-wallet" class="btn-link">Terminate Link</button>
                                             </div>
                                         </div>
@@ -194,6 +199,21 @@
                                             <span>Status</span>
                                             <strong>Session Active</strong>
                                         </div>
+                                    </div>
+                                    <!-- Demo Mode: Country Override -->
+                                    <div class="demo-override-row">
+                                        <span class="demo-label">🌐 Demo: Override Country</span>
+                                        <select id="demo-country-override" onchange="window.overrideCountry(this.value)">
+                                            <option value="">-- Use Auto-Detect --</option>
+                                            <option value="IN|India">🇮🇳 India</option>
+                                            <option value="US|United States">🇺🇸 United States</option>
+                                            <option value="UK|United Kingdom">🇬🇧 United Kingdom</option>
+                                            <option value="EU|Europe">🇪🇺 Europe</option>
+                                            <option value="JP|Japan">🇯🇵 Japan</option>
+                                            <option value="SG|Singapore">🇸🇬 Singapore</option>
+                                            <option value="AU|Australia">🇦🇺 Australia</option>
+                                            <option value="CA|Canada">🇨🇦 Canada</option>
+                                        </select>
                                     </div>
                                 </div>
                             </div>
@@ -225,28 +245,45 @@
 
                                     <div class="field-row">
                                         <div class="field-group flex-1">
-                                            <label>Destination</label>
+                                            <label>Source Country</label>
                                             <div class="field-input">
-                                                <select id="dest-country">
+                                                <select id="source-country">
                                                     <option value="IN">India</option>
                                                     <option value="US">United States</option>
                                                     <option value="UK">United Kingdom</option>
                                                     <option value="EU">Europe</option>
                                                     <option value="JP">Japan</option>
                                                     <option value="SG">Singapore</option>
+                                                    <option value="AU">Australia</option>
+                                                    <option value="CA">Canada</option>
                                                 </select>
                                             </div>
                                         </div>
                                         <div class="field-group flex-1">
-                                            <label>Currency</label>
+                                            <label>Destination Country</label>
                                             <div class="field-input">
-                                                <select id="source-currency">
-                                                    <option value="inr">INR (₹)</option>
-                                                    <option value="usd">USD ($)</option>
-                                                    <option value="eur">EUR (€)</option>
-                                                    <option value="gbp">GBP (£)</option>
+                                                <select id="dest-country">
+                                                    <option value="US">United States</option>
+                                                    <option value="IN">India</option>
+                                                    <option value="UK">United Kingdom</option>
+                                                    <option value="EU">Europe</option>
+                                                    <option value="JP">Japan</option>
+                                                    <option value="SG">Singapore</option>
+                                                    <option value="AU">Australia</option>
+                                                    <option value="CA">Canada</option>
                                                 </select>
                                             </div>
+                                        </div>
+                                    </div>
+                                    <div class="field-group">
+                                        <label>Currency</label>
+                                        <div class="field-input">
+                                            <select id="source-currency">
+                                                <option value="inr">INR (₹)</option>
+                                                <option value="usd">USD ($)</option>
+                                                <option value="eur">EUR (€)</option>
+                                                <option value="gbp">GBP (£)</option>
+                                            </select>
                                         </div>
                                     </div>
 
@@ -371,17 +408,19 @@
                                     <tr>
                                         <th>TX Hash</th>
                                         <th>Date / Time</th>
-                                        <th>Direction</th>
-                                        <th>Address</th>
-                                        <th>Fiat</th>
+                                        <th>Sender</th>
+                                        <th>From Country</th>
+                                        <th>Receiver</th>
+                                        <th>To Country</th>
+                                        <th>Fiat Amount</th>
                                         <th>ETH Volume</th>
                                         <th>Fee</th>
-                                        <th>Result</th>
+                                        <th>Status</th>
                                     </tr>
                                 </thead>
                                 <tbody id="tx-log-full">
                                     <tr>
-                                        <td colspan="8" class="empty-data">No settlements recorded yet.</td>
+                                        <td colspan="10" class="empty-data">No settlements recorded yet.</td>
                                     </tr>
                                 </tbody>
                             </table>
