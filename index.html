@@ -246,32 +246,16 @@
                                     <div class="field-row">
                                         <div class="field-group flex-1">
                                             <label>Source Country</label>
-                                            <div class="field-input">
-                                                <select id="source-country">
-                                                    <option value="IN">India</option>
-                                                    <option value="US">United States</option>
-                                                    <option value="UK">United Kingdom</option>
-                                                    <option value="EU">Europe</option>
-                                                    <option value="JP">Japan</option>
-                                                    <option value="SG">Singapore</option>
-                                                    <option value="AU">Australia</option>
-                                                    <option value="CA">Canada</option>
-                                                </select>
+                                            <div class="field-input" style="background: var(--bg-secondary); padding: 12px; border-radius: 8px; border: 1px solid var(--border); display: flex; align-items: center; cursor: not-allowed;">
+                                                <span id="source-country-display-text" style="font-weight: 600; color: var(--text);">Detecting...</span>
+                                                <input type="hidden" id="source-country" value="US">
                                             </div>
                                         </div>
                                         <div class="field-group flex-1">
-                                            <label>Destination Country</label>
-                                            <div class="field-input">
-                                                <select id="dest-country">
-                                                    <option value="US">United States</option>
-                                                    <option value="IN">India</option>
-                                                    <option value="UK">United Kingdom</option>
-                                                    <option value="EU">Europe</option>
-                                                    <option value="JP">Japan</option>
-                                                    <option value="SG">Singapore</option>
-                                                    <option value="AU">Australia</option>
-                                                    <option value="CA">Canada</option>
-                                                </select>
+                                            <label>Currency</label>
+                                            <div class="field-input" style="background: var(--bg-secondary); padding: 12px; border-radius: 8px; border: 1px solid var(--border); display: flex; align-items: center; cursor: not-allowed;">
+                                                <span id="source-currency-display-text" style="font-weight: 600; color: var(--text);">--</span>
+                                                <input type="hidden" id="source-currency" value="usd">
                                             </div>
                                         </div>
                                     </div>
@@ -412,9 +396,9 @@
                                     <h3>Full Settlement Ledger</h3>
                                     <p class="ledger-subtitle" id="ledger-count">0 transactions recorded</p>
                                 </div>
-                                <div class="ledger-tabs" style="display: flex; gap: 8px; background: var(--bg-secondary); padding: 4px; border-radius: 8px;">
-                                    <button id="tab-sent" class="btn btn-sm active" style="border-radius: 6px; border: none; padding: 6px 12px; cursor: pointer; background: var(--bg); font-weight: 600;">Sent</button>
-                                    <button id="tab-received" class="btn btn-sm" style="border-radius: 6px; border: none; padding: 6px 12px; cursor: pointer; background: transparent; font-weight: 600;">Received</button>
+                                <div class="ledger-tabs" style="display: flex; gap: 8px; background: var(--bg-color); padding: 4px; border-radius: 8px;">
+                                    <button id="tab-sent" class="btn btn-sm active" style="border-radius: 6px; border: 1px solid var(--border-color); padding: 6px 12px; cursor: pointer; background: var(--card-bg); font-weight: 600;">Sent</button>
+                                    <button id="tab-received" class="btn btn-sm" style="border-radius: 6px; border: 1px solid var(--border-color); padding: 6px 12px; cursor: pointer; background: transparent; font-weight: 600;">Received</button>
                                 </div>
                             </div>
                         </div>

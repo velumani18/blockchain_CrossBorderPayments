@@ -235,6 +235,7 @@ async function fetchRates() {
 }
 
 function bindConversionEvents() {
+    const fiatInput    = document.getElementById('fiat-amount');
     const fiatInput      = document.getElementById('fiat-amount');
     const currencySelect = document.getElementById('source-currency');
     const assetSelect    = document.getElementById('transfer-asset');
@@ -246,6 +247,7 @@ function bindConversionEvents() {
         debounceTimer = setTimeout(updateConversion, 300);
     };
 
+    if (fiatInput) fiatInput.addEventListener('input', trigger);
     fiatInput.addEventListener('input', trigger);
     currencySelect.addEventListener('change', () => {
         document.getElementById('currency-unit').textContent = currencySelect.value.toUpperCase();
@@ -511,6 +513,7 @@ async function broadcastPayload(e) {
     const target      = document.getElementById('recipient').value.trim();
     const fiatAmount  = parseFloat(document.getElementById('fiat-amount').value);
     const currency    = document.getElementById('source-currency').value;
+    const destCountry = 'Global'; // Removed dest-country dropdown
     const destCountry = document.getElementById('dest-country').value;
     const asset       = document.getElementById('transfer-asset').value;
 
@@ -647,41 +650,79 @@ async function broadcastPayload(e) {
    ═══════════════════════════════════════════════════════════════════════ */
 window.setLedgerTab = function(tab) {
     ledgerTab = tab;
-    document.getElementById('tab-sent').style.background = tab === 'sent' ? 'var(--bg)' : 'transparent';
-    document.getElementById('tab-received').style.background = tab === 'received' ? 'var(--bg)' : 'transparent';
+    document.getElementById('tab-sent').style.background = tab === 'sent' ? 'var(--card-bg)' : 'transparent';
+    document.getElementById('tab-received').style.background = tab === 'received' ? 'var(--card-bg)' : 'transparent';
     if (tab === 'received') window.dismissReceivedBanner(); // Mark as seen when user opens received tab
     renderHistory();
 };
 
 async function loadOnChainTransactions() {
-    if (!contract || !userAddress) {
+    if (!provider || !userAddress) {
         onChainTxs = [];
         return;
     }
     try {
-        pushLog('Chain: Querying on-chain events via contract logs...', 'engine');
-        // Use event log queries to get REAL transaction hashes (not fake pseudo-hashes)
-        const sentFilter     = contract.filters.PaymentSent(null, userAddress, null);
-        const receivedFilter = contract.filters.PaymentSent(null, null, userAddress);
+        pushLog('Chain: Querying on-chain events via global index logs...', 'engine');
+        const iface = new ethers.Interface(CONTRACT_ABI);
+        const paymentSentTopic = iface.getEvent("PaymentSent").topicHash;
+        const paddedAddress = ethers.zeroPadValue(userAddress, 32);
 
-        const [sentEvents, receivedEvents] = await Promise.all([
-            contract.queryFilter(sentFilter),
-            contract.queryFilter(receivedFilter)
-        ]);
+        // 1. If a local contract is deployed/saved, query it safely from block 0
+        const queryPromises = [];
+        if (typeof contract !== 'undefined' && contract && contract.target) {
+            queryPromises.push(provider.getLogs({
+                address: contract.target,
+                fromBlock: 0,
+                toBlock: 'latest',
+                topics: [paymentSentTopic, null, paddedAddress, null]
+            }).catch(() => []));
+            queryPromises.push(provider.getLogs({
+                address: contract.target,
+                fromBlock: 0,
+                toBlock: 'latest',
+                topics: [paymentSentTopic, null, null, paddedAddress]
+            }).catch(() => []));
+        }
 
-        const allEvents = [...sentEvents, ...receivedEvents];
-        // Deduplicate by real tx hash + paymentId
-        const uniqueEvents = Array.from(
-            new Map(allEvents.map(e => [e.transactionHash + e.args.paymentId.toString(), e])).values()
+        // 2. Query ANY contract from the last ~9000 blocks, but split into safe RPC chunks of 1500
+        const currentBlock = await provider.getBlockNumber().catch(() => 0);
+        const CHUNK_SIZE = 1500;
+        const TARGET_BLOCKS = 9000;
+        const startBlock = Math.max(0, currentBlock - TARGET_BLOCKS);
+
+        for (let b = startBlock; b <= currentBlock; b += CHUNK_SIZE + 1) {
+            let endB = Math.min(b + CHUNK_SIZE, currentBlock);
+            if (b > endB) break;
+            
+            queryPromises.push(provider.getLogs({
+                fromBlock: b,
+                toBlock: endB,
+                topics: [paymentSentTopic, null, paddedAddress, null]
+            }).catch(() => []));
+            queryPromises.push(provider.getLogs({
+                fromBlock: b,
+                toBlock: endB,
+                topics: [paymentSentTopic, null, null, paddedAddress]
+            }).catch(() => []));
+        }
+
+        const logResults = await Promise.all(queryPromises);
+        let allLogs = [];
+        logResults.forEach(arr => { allLogs = allLogs.concat(arr); });
+        
+        // Deduplicate by real tx hash + paymentId (extracted from logs to be safe)
+        const uniqueLogs = Array.from(
+            new Map(allLogs.map(log => [log.transactionHash + log.topics[1], log])).values()
         );
 
-        const fetched = uniqueEvents.map(event => {
-            const args      = event.args;
+        const fetched = uniqueLogs.map(log => {
+            const parsed = iface.parseLog(log);
+            const args = parsed.args;
             const ethAmount = ethers.formatEther(args.amount);
             const feeGwei   = Number(ethers.formatUnits(args.fee, 'gwei'));
             const dateObj   = new Date(Number(args.timestamp) * 1000);
             return {
-                hash:          event.transactionHash,   // REAL Ethereum tx hash
+                hash:          log.transactionHash,
                 paymentId:     args.paymentId.toString(),
                 sender:        args.sender,
                 dest:          args.receiver,
@@ -698,10 +739,10 @@ async function loadOnChainTransactions() {
         });
 
         onChainTxs = fetched.sort((a, b) => new Date(b.date + ' ' + b.time) - new Date(a.date + ' ' + a.time));
-        pushLog(`Chain: Loaded ${onChainTxs.length} on-chain transaction(s) with real TX hashes.`, 'engine');
+        pushLog(`Chain: Loaded ${onChainTxs.length} on-chain transaction(s) from global index.`, 'engine');
     } catch(e) {
         console.error('Failed to fetch on-chain txs', e);
-        pushLog('Chain: Failed to query on-chain events.', 'error');
+        pushLog('Chain: Failed to query global on-chain events.', 'error');
     }
 }
 
@@ -776,6 +817,10 @@ function renderHistory() {
         const feeDisplay = parseFloat(t.fee) > 0
             ? (assetStr === 'ETH' ? `${parseFloat(t.fee).toLocaleString(undefined, { maximumFractionDigits: 2 })} Gwei` : `${parseFloat(t.fee).toFixed(3)} ${assetStr}`)
             : '—';
+        
+        const toCountryDisplay = (ledgerTab === 'sent') ? 'Global' : (t.country || '—');
+        const fromCountryDisplay = (ledgerTab === 'received') ? 'Global' : (t.sourceCountry || '—');
+
         return `
         <tr>
             <td class="mono fs-11">
@@ -784,9 +829,9 @@ function renderHistory() {
             </td>
             <td>${t.date || ''} ${t.time}</td>
             <td class="mono fs-11" title="${senderDisplay}">${shortAddr(senderDisplay)}</td>
-            <td><span class="country-chip">${t.sourceCountry || '—'}</span></td>
+            <td><span class="country-chip">${fromCountryDisplay}</span></td>
             <td class="mono fs-11" title="${receiverDisplay}">${shortAddr(receiverDisplay)}</td>
-            <td><span class="country-chip">${t.country || '—'}</span></td>
+            <td><span class="country-chip">${toCountryDisplay}</span></td>
             <td>${t.fiatAmount}</td>
             <td class="fw-800">${ethAmtDisplay}</td>
             <td class="${parseFloat(t.fee) > 0 ? 'fee-text' : ''}">${feeDisplay}</td>
@@ -806,9 +851,17 @@ async function refreshTelemetry() {
         document.getElementById('user-balance').innerHTML = `${eth.toFixed(4)} <span>ETH</span>`;
 
         const rates = await fetchRates();
-        const usdRate = rates.usd || 2450;
+        const baseCurrencyToken = document.getElementById('source-currency')?.value || 'usd';
+        const rate = rates[baseCurrencyToken] || rates.usd || 2450;
+        
+        let currencyFormat = baseCurrencyToken.toUpperCase();
+        let locale = 'en-US';
+        if (baseCurrencyToken === 'inr') locale = 'en-IN';
+        if (baseCurrencyToken === 'eur') locale = 'de-DE';
+        if (baseCurrencyToken === 'gbp') locale = 'en-GB';
+
         document.getElementById('balance-usd').textContent =
-            (eth * usdRate).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+            (eth * rate).toLocaleString(locale, { style: 'currency', currency: currencyFormat });
 
         const net = await provider.getNetwork();
         document.getElementById('chain-id').textContent = net.chainId.toString();
@@ -878,26 +931,58 @@ function showNotification(msg, type = 'info') {
 
 async function detectAndSetCountry() {
     try {
-        const res  = await fetch('https://ipapi.co/json/');
-        if (!res.ok) throw new Error('API error');
-        const data = await res.json();
-        const code = data.country_code; // e.g. "IN"
-        const name = data.country_name; // e.g. "India"
+        let code = 'US';
+        let name = 'United States';
+        try {
+            const res = await fetch('https://ipapi.co/json/');
+            if (!res.ok) throw new Error('API limit');
+            const data = await res.json();
+            if (data.country_code) {
+                code = data.country_code;
+                name = data.country_name;
+            }
+        } catch (e1) {
+            const fb = await fetch('https://get.geojs.io/v1/ip/geo.json');
+            if (fb.ok) {
+                const fData = await fb.json();
+                if (fData.country_code) {
+                    code = fData.country_code;
+                    name = fData.country;
+                }
+            }
+        }
 
         // Persist tied to wallet address so receiver's country is also stored
         if (userAddress) {
             localStorage.setItem(`cbp_country_${userAddress.toLowerCase()}`, JSON.stringify({ code, name }));
         }
 
-        // Auto-set the source-country dropdown
+        // Auto-set the source-country and currency
         const sel = document.getElementById('source-country');
-        if (sel && code) {
-            const option = Array.from(sel.options).find(o => o.value === code);
-            if (option) {
-                sel.value = code;
-                const lbl = sel.closest('.field-group')?.querySelector('label');
-                if (lbl) lbl.innerHTML = `Source Country <span class="geo-tag">● AUTO-DETECTED</span>`;
-            }
+        const disp = document.getElementById('source-country-display-text');
+        if (sel && disp && code) {
+            sel.value = code;
+            disp.textContent = name;
+            
+            // Auto-set currency based on country
+            const currencyMap = {
+                'IN': { code: 'inr', symbol: 'INR (₹)' },
+                'US': { code: 'usd', symbol: 'USD ($)' },
+                'UK': { code: 'gbp', symbol: 'GBP (£)' },
+                'GB': { code: 'gbp', symbol: 'GBP (£)' },
+                'EU': { code: 'eur', symbol: 'EUR (€)' },
+                'DE': { code: 'eur', symbol: 'EUR (€)' },
+                'FR': { code: 'eur', symbol: 'EUR (€)' },
+                'IT': { code: 'eur', symbol: 'EUR (€)' },
+            };
+            const curr = currencyMap[code] || { code: 'usd', symbol: 'USD ($)' }; // Default
+            document.getElementById('source-currency').value = curr.code;
+            const curDisp = document.getElementById('source-currency-display-text');
+            if (curDisp) curDisp.textContent = curr.symbol;
+            const curUnit = document.getElementById('currency-unit');
+            if (curUnit) curUnit.textContent = curr.code.toUpperCase();
+            if (typeof updateConversion === 'function') updateConversion();
+            if (typeof refreshTelemetry === 'function') refreshTelemetry();
         }
 
         // Show detected country badge in the identity panel
@@ -906,7 +991,7 @@ async function detectAndSetCountry() {
 
         pushLog(`Geo: Location resolved — ${name} (${code}).`, 'system');
     } catch (e) {
-        pushLog('Geo: Country auto-detection unavailable. Please select manually.', 'error');
+        pushLog('Geo: Country auto-detection unavailable or failed.', 'error');
     }
 }
 
@@ -986,15 +1071,29 @@ window.overrideCountry = function(value) {
     }
     const [code, name] = value.split('|');
 
-    // Update source-country dropdown
+    // Update source-country and currency
     const sel = document.getElementById('source-country');
-    if (sel) {
-        const option = Array.from(sel.options).find(o => o.value === code);
-        if (option) {
-            sel.value = code;
-            const lbl = sel.closest('.field-group')?.querySelector('label');
-            if (lbl) lbl.innerHTML = `Source Country <span class="geo-tag">● DEMO OVERRIDE</span>`;
-        }
+    const disp = document.getElementById('source-country-display-text');
+    if (sel && disp && code) {
+        sel.value = code;
+        disp.textContent = name;
+        
+        // Auto-set currency based on country
+        const currencyMap = {
+            'IN': { code: 'inr', symbol: 'INR (₹)' },
+            'US': { code: 'usd', symbol: 'USD ($)' },
+            'UK': { code: 'gbp', symbol: 'GBP (£)' },
+            'GB': { code: 'gbp', symbol: 'GBP (£)' },
+            'EU': { code: 'eur', symbol: 'EUR (€)' },
+        };
+        const curr = currencyMap[code] || { code: 'usd', symbol: 'USD ($)' }; // Default
+        document.getElementById('source-currency').value = curr.code;
+        const curDisp = document.getElementById('source-currency-display-text');
+        if (curDisp) curDisp.textContent = curr.symbol;
+        const curUnit = document.getElementById('currency-unit');
+        if (curUnit) curUnit.textContent = curr.code.toUpperCase();
+        if (typeof updateConversion === 'function') updateConversion();
+        if (typeof refreshTelemetry === 'function') refreshTelemetry();
     }
 
     // Update identity badge
