@@ -236,7 +236,6 @@ async function fetchRates() {
 
 function bindConversionEvents() {
     const fiatInput    = document.getElementById('fiat-amount');
-    const fiatInput      = document.getElementById('fiat-amount');
     const currencySelect = document.getElementById('source-currency');
     const assetSelect    = document.getElementById('transfer-asset');
     const approveBtn     = document.getElementById('approve-token');
@@ -248,7 +247,6 @@ function bindConversionEvents() {
     };
 
     if (fiatInput) fiatInput.addEventListener('input', trigger);
-    fiatInput.addEventListener('input', trigger);
     currencySelect.addEventListener('change', () => {
         document.getElementById('currency-unit').textContent = currencySelect.value.toUpperCase();
         trigger();
@@ -513,8 +511,7 @@ async function broadcastPayload(e) {
     const target      = document.getElementById('recipient').value.trim();
     const fiatAmount  = parseFloat(document.getElementById('fiat-amount').value);
     const currency    = document.getElementById('source-currency').value;
-    const destCountry = 'Global'; // Removed dest-country dropdown
-    const destCountry = document.getElementById('dest-country').value;
+    const destCountry = document.getElementById('dest-country')?.value || 'Global';
     const asset       = document.getElementById('transfer-asset').value;
 
     // ── Validate ──
@@ -674,13 +671,13 @@ async function loadOnChainTransactions() {
                 address: contract.target,
                 fromBlock: 0,
                 toBlock: 'latest',
-                topics: [paymentSentTopic, null, paddedAddress, null]
+                topics: [paymentSentTopic, null, paddedAddress, null] // Topic 1=token, 2=sender
             }).catch(() => []));
             queryPromises.push(provider.getLogs({
                 address: contract.target,
                 fromBlock: 0,
                 toBlock: 'latest',
-                topics: [paymentSentTopic, null, null, paddedAddress]
+                topics: [paymentSentTopic, null, null, paddedAddress] // Topic 1=token, 2=sender, 3=receiver
             }).catch(() => []));
         }
 
@@ -697,12 +694,12 @@ async function loadOnChainTransactions() {
             queryPromises.push(provider.getLogs({
                 fromBlock: b,
                 toBlock: endB,
-                topics: [paymentSentTopic, null, paddedAddress, null]
+                topics: [paymentSentTopic, null, paddedAddress, null] // Topic 2 is sender
             }).catch(() => []));
             queryPromises.push(provider.getLogs({
                 fromBlock: b,
                 toBlock: endB,
-                topics: [paymentSentTopic, null, null, paddedAddress]
+                topics: [paymentSentTopic, null, null, paddedAddress] // Topic 3 is receiver
             }).catch(() => []));
         }
 
@@ -721,12 +718,23 @@ async function loadOnChainTransactions() {
             const ethAmount = ethers.formatEther(args.amount);
             const feeGwei   = Number(ethers.formatUnits(args.fee, 'gwei'));
             const dateObj   = new Date(Number(args.timestamp) * 1000);
+            const tokenAddr = args.token.toLowerCase();
+            let assetName = 'ETH';
+            for (const [name, addr] of Object.entries(SUPPORTED_TOKENS)) {
+                if (addr.toLowerCase() === tokenAddr) {
+                    assetName = name;
+                    break;
+                }
+            }
+
             return {
                 hash:          log.transactionHash,
                 paymentId:     args.paymentId.toString(),
+                token:         args.token,
+                assetName:     assetName,
                 sender:        args.sender,
                 dest:          args.receiver,
-                ethValue:      parseFloat(ethAmount).toFixed(6),
+                ethValue:      assetName === 'ETH' ? parseFloat(ethAmount).toFixed(6) : ethAmount, // Raw units for tokens if decimals unknown
                 fiatAmount:    `\u2014 (${args.sourceCurrency})`,
                 currency:      args.sourceCurrency,
                 sourceCountry: args.sourceCountry || '\u2014',
@@ -1246,7 +1254,7 @@ contract CrossBorderPayment {
     }
 
     /* ─── CORE PIPELINE ─── */
-    function sendPayment(address payable _receiver, string calldata _sourceCurrency, string calldata _destCountry) 
+    function sendPayment(address payable _receiver, string calldata _sourceCurrency, string calldata _sourceCountry, string calldata _destCountry) 
         external payable whenNotPaused notBlacklisted(msg.sender) notBlacklisted(_receiver) 
     {
         // ── Security Constraints ──
@@ -1273,7 +1281,42 @@ contract CrossBorderPayment {
         (bool success, ) = _receiver.call{value: transferAmount}("");
         require(success, "Settlement failed structurally");
 
-        emit PaymentSent(paymentId, msg.sender, _receiver, msg.value, fee, _sourceCurrency, _destCountry, block.timestamp);
+        emit PaymentSent(paymentId, msg.sender, _receiver, msg.value, fee, _sourceCurrency, _sourceCountry, _destCountry, block.timestamp);
+    }
+
+    /**
+     * @dev ERC20 token payment routing with platform fee.
+     *      User must approve the contract as spender first.
+     */
+    function sendTokenPayment(address _token, address _receiver, uint256 _amount, string calldata _sourceCurrency, string calldata _sourceCountry, string calldata _destCountry) 
+        external whenNotPaused notBlacklisted(msg.sender) notBlacklisted(_receiver)
+    {
+        require(_amount > 0, "Zero amount");
+        require(_token != address(0), "Invalid token");
+
+        uint256 fee = (_amount * feePercentage) / 10000;
+        uint256 transferAmount = _amount - fee;
+
+        // Record payment (using msg.value=0 as it's a token payment)
+        uint256 paymentId = payments.length;
+        payments.push(Payment({
+            sender: msg.sender, receiver: _receiver, amount: _amount, fee: fee,
+            timestamp: block.timestamp, sourceCurrency: _sourceCurrency, destCountry: _destCountry
+        }));
+
+        userPaymentIds[msg.sender].push(paymentId);
+        userPaymentIds[_receiver].push(paymentId);
+        totalFeesCollected += fee; // Note: In a real app, you'd track tokens separately
+
+        // Pull tokens from sender
+        bool pulled = IERC20(_token).transferFrom(msg.sender, address(this), _amount);
+        require(pulled, "Token pull failed");
+
+        // Send tokens to receiver
+        bool sent = IERC20(_token).transfer(_receiver, transferAmount);
+        require(sent, "Token send failed");
+
+        emit PaymentSent(paymentId, msg.sender, _receiver, _amount, fee, _sourceCurrency, _sourceCountry, _destCountry, block.timestamp);
     }
 
     function withdrawFees() external onlyOwner {
@@ -1282,6 +1325,12 @@ contract CrossBorderPayment {
         (bool success, ) = payable(owner).call{value: balance}("");
         require(success, "Withdrawal execution fault");
         emit FeeWithdrawn(owner, balance);
+    }
+    
+    // Minimal IERC20 for internal use
+    interface IERC20 {
+        function transfer(address to, uint256 value) external returns (bool);
+        function transferFrom(address from, address to, uint256 value) external returns (bool);
     }
 
     /* ─── VIEW ─── */

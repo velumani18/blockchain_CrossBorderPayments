@@ -255,7 +255,7 @@
                                             <label>Currency</label>
                                             <div class="field-input" style="background: var(--bg-secondary); padding: 12px; border-radius: 8px; border: 1px solid var(--border); display: flex; align-items: center; cursor: not-allowed;">
                                                 <span id="source-currency-display-text" style="font-weight: 600; color: var(--text);">--</span>
-                                                <input type="hidden" id="source-currency" value="usd">
+                                                <input type="hidden" id="source-currency-detected" value="usd">
                                             </div>
                                         </div>
                                     </div>
@@ -281,6 +281,23 @@
                                                     <option value="gbp">GBP (£)</option>
                                                 </select>
                                             </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="field-group">
+                                        <label>Destination Country</label>
+                                        <div class="field-input">
+                                            <select id="dest-country">
+                                                <option value="India">🇮🇳 India</option>
+                                                <option value="United States">🇺🇸 United States</option>
+                                                <option value="United Kingdom">🇬🇧 United Kingdom</option>
+                                                <option value="Europe">🇪🇺 Europe</option>
+                                                <option value="Japan">🇯🇵 Japan</option>
+                                                <option value="Singapore">🇸🇬 Singapore</option>
+                                                <option value="Australia">🇦🇺 Australia</option>
+                                                <option value="Canada">🇨🇦 Canada</option>
+                                                <option value="Other">🌐 Other (Global)</option>
+                                            </select>
                                         </div>
                                     </div>
 

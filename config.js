@@ -65,10 +65,16 @@ export const CONTRACT_ABI = [
         "anonymous": false,
         "inputs": [
             {
-                "indexed": true,
+                "indexed": false,
                 "internalType": "uint256",
                 "name": "paymentId",
                 "type": "uint256"
+            },
+            {
+                "indexed": true,
+                "internalType": "address",
+                "name": "token",
+                "type": "address"
             },
             {
                 "indexed": true,
@@ -321,6 +327,44 @@ export const CONTRACT_ABI = [
         "name": "sendPayment",
         "outputs": [],
         "stateMutability": "payable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "_token",
+                "type": "address"
+            },
+            {
+                "internalType": "address",
+                "name": "_receiver",
+                "type": "address"
+            },
+            {
+                "internalType": "uint256",
+                "name": "_amount",
+                "type": "uint256"
+            },
+            {
+                "internalType": "string",
+                "name": "_sourceCurrency",
+                "type": "string"
+            },
+            {
+                "internalType": "string",
+                "name": "_sourceCountry",
+                "type": "string"
+            },
+            {
+                "internalType": "string",
+                "name": "_destCountry",
+                "type": "string"
+            }
+        ],
+        "name": "sendTokenPayment",
+        "outputs": [],
+        "stateMutability": "nonpayable",
         "type": "function"
     },
     {

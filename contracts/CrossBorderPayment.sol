@@ -51,10 +51,10 @@ contract CrossBorderPayment {
 
     // ── Events ──────────────────────────────────────────────────────────
     event PaymentSent(
-        uint256 indexed paymentId,
+        uint256 paymentId,
         address indexed token, // address(0) if ETH
         address indexed sender,
-        address receiver,
+        address indexed receiver,
         uint256 amount,
         uint256 fee,
         string  sourceCurrency,
