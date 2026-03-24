@@ -271,13 +271,38 @@ async function updateConversion() {
     const asset      = document.getElementById('transfer-asset').value;
     const display    = document.getElementById('conversion-display');
 
-    if (!fiatAmount || fiatAmount <= 0) { display.classList.add('hidden'); return; }
-
     const rates = await fetchRates();
     const rate  = rates[currency]; // FIAT to ETH rate
     if (!rate) { display.classList.add('hidden'); return; }
 
     const sym = CURRENCY_SYMBOLS[currency] || '';
+
+    // Update sidebar market rates dynamically based on selected fiat peg & execution asset
+    const primaryLabel = document.getElementById('market-primary-label');
+    const primaryVal = document.getElementById('market-primary-val');
+    const secLabel = document.getElementById('market-secondary-label');
+    const secVal = document.getElementById('market-secondary-val');
+
+    if (asset === 'ETH') {
+        if (primaryLabel) primaryLabel.textContent = `ETH / ${currency.toUpperCase()}`;
+        if (primaryVal) primaryVal.textContent = `${sym}${rates[currency].toLocaleString(undefined, {maximumFractionDigits: 2})}`;
+        
+        const otherCurrency = currency === 'usd' ? 'inr' : 'usd';
+        const otherSym = CURRENCY_SYMBOLS[otherCurrency];
+        if (secLabel) secLabel.textContent = `ETH / ${otherCurrency.toUpperCase()}`;
+        if (secVal) secVal.textContent = `${otherSym}${rates[otherCurrency].toLocaleString(undefined, {maximumFractionDigits: 2})}`;
+    } else {
+        // For Stablecoins pegged to USD
+        const fiatRate = rates[currency] / rates.usd; // fiat equivalent of 1 USD
+        if (primaryLabel) primaryLabel.textContent = `${asset} / USD`;
+        if (primaryVal) primaryVal.textContent = `$1.00`;
+        
+        if (secLabel) secLabel.textContent = `${asset} / ${currency.toUpperCase()}`;
+        if (secVal) secVal.textContent = `${sym}${fiatRate.toFixed(2)}`;
+    }
+
+    if (!fiatAmount || fiatAmount <= 0) { display.classList.add('hidden'); return; }
+
     let cryptoAmount = 0;
 
     // Stablecoin conversion (pegged to USD)
@@ -299,10 +324,6 @@ async function updateConversion() {
     document.getElementById('conv-receives').textContent = `${receives.toFixed(6)} ${asset}`;
 
     display.classList.remove('hidden');
-
-    // Update sidebar market rates
-    if (rates.usd) document.getElementById('eth-price-val').textContent = `$${rates.usd.toLocaleString()}`;
-    if (rates.inr) document.getElementById('eth-inr-val').textContent   = `₹${rates.inr.toLocaleString()}`;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -445,7 +466,7 @@ async function approveToken() {
         
         const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
         let decimals = 18;
-        try { decimals = await tokenContract.decimals(); } catch(e) {}
+        try { decimals = Number(await tokenContract.decimals()); } catch(e) {}
         
         const amountWei = ethers.parseUnits(cryptoAmount.toFixed(Math.min(decimals, 6)), decimals);
 
@@ -509,7 +530,7 @@ async function broadcastPayload(e) {
         
         try {
             const tokenContract = new ethers.Contract(SUPPORTED_TOKENS[asset], ERC20_ABI, signer);
-            decimals = await tokenContract.decimals();
+            decimals = Number(await tokenContract.decimals());
         } catch(e) { decimals = 18; }
         
         strAmount = cryptoAmount.toFixed(Math.min(decimals, 6)); // ensure safe precision
@@ -1002,6 +1023,9 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('fiat-amount').oninput = (e) => {
         if (e.target.value) pushLog(`Buffer: Volume parity check for ${e.target.value} ${document.getElementById('source-currency').value.toUpperCase()}...`, 'engine');
     };
+
+    // Auto-fetch market intelligence on boot
+    updateConversion();
 });
 
 /* ═══════════════════════════════════════════════════════════════════════
