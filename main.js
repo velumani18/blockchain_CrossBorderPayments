@@ -43,11 +43,25 @@ function switchPage(pageId) {
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
     const page = document.getElementById(`page-${pageId}`);
     const nav  = document.querySelector(`[data-page="${pageId}"]`);
+    const contentBox = document.querySelector('.content');
     if (page) {
         page.classList.remove('hidden');
         page.classList.add('animate-in');
-        document.getElementById('page-title').textContent =
-            pageId === 'dashboard' ? 'Terminal Console' : 'Settlement Ledger';
+        
+        let title = 'Terminal Console';
+        if (pageId === 'ledger') title = 'Settlement Ledger';
+        if (pageId === 'ide') title = 'Smart Contract Studio';
+        document.getElementById('page-title').textContent = title;
+        
+        if (pageId === 'ide') {
+            contentBox.classList.add('ide-active');
+            if (typeof window.initIDE === 'function') window.initIDE();
+            
+            // Re-layout monaco editor to fill the new space
+            setTimeout(() => { if (monacoEditor) monacoEditor.layout(); }, 50);
+        } else {
+            contentBox.classList.remove('ide-active');
+        }
     }
     if (nav) nav.classList.add('active');
     pushLog(`Navigator: Routing to ${pageId.toUpperCase()} workspace.`, 'system');
@@ -663,3 +677,300 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.target.value) pushLog(`Buffer: Volume parity check for ${e.target.value} ${document.getElementById('source-currency').value.toUpperCase()}...`, 'engine');
     };
 });
+
+/* ═══════════════════════════════════════════════════════════════════════
+   MODULE 6 — IN-BROWSER SOLIDITY IDE & COMPILER
+   ═══════════════════════════════════════════════════════════════════════ */
+let monacoEditor = null;
+let compilerWorker = null;
+let customCompiledData = null;
+
+const defaultContractSource = `// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+/**
+ * @title CrossBorderPayment
+ * @dev Re-engineered for maximum security and compliance with
+ *      circuit breakers, volume limits, and address tracking.
+ */
+contract CrossBorderPayment {
+
+    // Roles
+    address public owner;
+    
+    // Core Parameters
+    uint256 public feePercentage; // Basis points (50 = 0.5%)
+    uint256 public totalFeesCollected;
+    
+    // Compliance Thresholds
+    uint256 public minTransactionAmount = 0.001 ether;
+    uint256 public maxTransactionAmount = 100 ether;
+    
+    // Circuit Breaker System
+    bool public isPaused;
+
+    // Entity Sanctions List
+    mapping(address => bool) public isBlacklisted;
+
+    struct Payment {
+        address sender;
+        address receiver;
+        uint256 amount;
+        uint256 fee;
+        uint256 timestamp;
+        string  sourceCurrency;
+        string  destCountry;
+    }
+
+    Payment[] public payments;
+    mapping(address => uint256[]) private userPaymentIds;
+
+    /* ─── EVENTS ─── */
+    event PaymentSent(uint256 indexed paymentId, address indexed sender, address indexed receiver, uint256 amount, uint256 fee, string sourceCurrency, string destCountry, uint256 timestamp);
+    event FeeWithdrawn(address indexed owner, uint256 amount);
+    event Paused(address account);
+    event Unpaused(address account);
+    event LimitsUpdated(uint256 minAmount, uint256 maxAmount);
+    event BlacklistUpdated(address indexed account, bool isListed);
+
+    /* ─── MODIFIERS ─── */
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Denied: System Administrator Root Required");
+        _;
+    }
+    
+    modifier whenNotPaused() {
+        require(!isPaused, "Circuit Breaker Active: Master contract is frozen");
+        _;
+    }
+
+    modifier notBlacklisted(address _account) {
+        require(!isBlacklisted[_account], "Sanctions Alert: Address is currently blacklisted");
+        _;
+    }
+
+    /* ─── CONSTRUCTOR ─── */
+    constructor(uint256 _feePercentage) {
+        require(_feePercentage <= 1000, "Maximum platform fee is 10%");
+        owner = msg.sender;
+        feePercentage = _feePercentage;
+    }
+
+    /* ─── ADMIN FUNCTIONS ─── */
+    function systemPanic() external onlyOwner {
+        isPaused = true;
+        emit Paused(msg.sender);
+    }
+    
+    function systemResume() external onlyOwner {
+        isPaused = false;
+        emit Unpaused(msg.sender);
+    }
+    
+    function configureThresholds(uint256 _min, uint256 _max) external onlyOwner {
+        require(_min < _max, "Constraint violation");
+        minTransactionAmount = _min;
+        maxTransactionAmount = _max;
+        emit LimitsUpdated(_min, _max);
+    }
+    
+    function setEntityStatus(address _account, bool _isBlacklisted) external onlyOwner {
+        isBlacklisted[_account] = _isBlacklisted;
+        emit BlacklistUpdated(_account, _isBlacklisted);
+    }
+
+    /* ─── CORE PIPELINE ─── */
+    function sendPayment(address payable _receiver, string calldata _sourceCurrency, string calldata _destCountry) 
+        external payable whenNotPaused notBlacklisted(msg.sender) notBlacklisted(_receiver) 
+    {
+        // ── Security Constraints ──
+        require(msg.value >= minTransactionAmount, "Volume too low");
+        require(msg.value <= maxTransactionAmount, "Volume exceeded capacity");
+        require(_receiver != address(0), "Null destination");
+        require(_receiver != msg.sender, "Loopback forbidden");
+
+        uint256 fee = (msg.value * feePercentage) / 10000;
+        uint256 transferAmount = msg.value - fee;
+
+        // ── State Mutators ──
+        uint256 paymentId = payments.length;
+        payments.push(Payment({
+            sender: msg.sender, receiver: _receiver, amount: msg.value, fee: fee,
+            timestamp: block.timestamp, sourceCurrency: _sourceCurrency, destCountry: _destCountry
+        }));
+
+        userPaymentIds[msg.sender].push(paymentId);
+        userPaymentIds[_receiver].push(paymentId);
+        totalFeesCollected += fee;
+
+        // ── I/O Interactions ──
+        (bool success, ) = _receiver.call{value: transferAmount}("");
+        require(success, "Settlement failed structurally");
+
+        emit PaymentSent(paymentId, msg.sender, _receiver, msg.value, fee, _sourceCurrency, _destCountry, block.timestamp);
+    }
+
+    function withdrawFees() external onlyOwner {
+        uint256 balance = address(this).balance;
+        require(balance > 0, "Treasury empty");
+        (bool success, ) = payable(owner).call{value: balance}("");
+        require(success, "Withdrawal execution fault");
+        emit FeeWithdrawn(owner, balance);
+    }
+
+    /* ─── VIEW ─── */
+    function getPaymentCount() external view returns (uint256) { return payments.length; }
+    function getUserPaymentIds(address _user) external view returns (uint256[] memory) { return userPaymentIds[_user]; }
+    function getPayment(uint256 _id) external view returns (Payment memory) {
+        require(_id < payments.length, "Orphaned pointer");
+        return payments[_id];
+    }
+}
+`;
+
+function logCompiler(msg, type = 'system') {
+    const consoleDiv = document.getElementById('compiler-console');
+    if (!consoleDiv) return;
+    const p = document.createElement('div');
+    p.className = `console-line ${type}`;
+    const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
+    p.textContent = `[${ts}] ${msg}`;
+    consoleDiv.appendChild(p);
+    consoleDiv.scrollTop = consoleDiv.scrollHeight;
+    pushLog(`Compiler: ${msg}`, 'system');
+}
+
+window.initIDE = function() {
+    if (monacoEditor) return; // Prevent multiple re-inits
+
+    if (window.require) {
+        require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs' }});
+        require(['vs/editor/editor.main'], function() {
+            monacoEditor = monaco.editor.create(document.getElementById('monaco-container'), {
+                value: defaultContractSource,
+                language: 'sol',
+                theme: 'vs-dark',
+                automaticLayout: true,
+                minimap: { enabled: true },
+                fontSize: 15,
+                lineHeight: 24,
+                fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+                fontLigatures: true,
+                padding: { top: 16 },
+                scrollBeyondLastLine: false,
+                renderLineHighlight: 'all',
+                cursorBlinking: 'smooth',
+                cursorSmoothCaretAnimation: 'on',
+                smoothScrolling: true,
+                bracketPairColorization: { enabled: true },
+                wordWrap: 'off',
+                tabSize: 4,
+            });
+            logCompiler('IDE engine loaded. Editor ready.', 'success');
+
+            // Re-layout after a small delay to ensure container is sized
+            setTimeout(() => { monacoEditor.layout(); }, 100);
+        });
+    } else {
+        logCompiler('Could not load IDE resources.', 'error');
+    }
+
+    // Initialize Web Worker
+    if (window.Worker && !compilerWorker) {
+        compilerWorker = new Worker('/compiler.worker.js');
+        compilerWorker.onmessage = function(e) {
+            const { type, payload, error } = e.data;
+            const overlay = document.getElementById('ide-overlay');
+            const statusEl = document.getElementById('ide-status');
+
+            overlay.classList.remove('active');
+
+            if (type === 'WORKER_READY') {
+                logCompiler('Solidity compiler loaded in background.', 'success');
+                if (statusEl) statusEl.querySelector('span:last-child').textContent = 'Ready';
+            } else if (type === 'COMPILED') {
+                logCompiler(`Build Successful: ${payload.contractName}`, 'success');
+                logCompiler(`Bytecode: ${payload.bytecode.length} chars`, 'system');
+                logCompiler(`ABI: ${payload.abi.length} entries`, 'system');
+                customCompiledData = payload;
+                const deployBtn = document.getElementById('deploy-custom-btn');
+                deployBtn.disabled = false;
+                deployBtn.innerHTML = '<span>🚀</span> Deploy ' + payload.contractName;
+                if (statusEl) statusEl.querySelector('span:last-child').textContent = 'Compiled ✓';
+                showNotification('Compilation Successful', 'success');
+            } else if (type === 'ERROR') {
+                logCompiler(`Compilation Failed:\n${error}`, 'error');
+                if (statusEl) statusEl.querySelector('span:last-child').textContent = 'Error';
+                showNotification('Compiler Error', 'error');
+            }
+        };
+    }
+
+    // Bind Compile Button
+    document.getElementById('compile-btn').onclick = () => {
+        if (!monacoEditor || !compilerWorker) return;
+        const sourceCode = monacoEditor.getValue();
+        if (!sourceCode.trim()) {
+            logCompiler('Abort: No source code.', 'error');
+            return;
+        }
+        document.getElementById('ide-overlay').classList.add('active');
+        document.getElementById('deploy-custom-btn').disabled = true;
+        const statusEl = document.getElementById('ide-status');
+        if (statusEl) statusEl.querySelector('span:last-child').textContent = 'Compiling...';
+        logCompiler('Sending source to solc compiler...', 'system');
+        compilerWorker.postMessage({ id: Date.now(), type: 'COMPILE', payload: { sourceCode } });
+    };
+
+    // Bind Deploy Button
+    document.getElementById('deploy-custom-btn').onclick = async () => {
+        if (!customCompiledData || !signer) {
+            showNotification('Wallet connection required for deployment', 'error');
+            return;
+        }
+        
+        const deployBtn = document.getElementById('deploy-custom-btn');
+        const origHTML = deployBtn.innerHTML;
+        deployBtn.disabled = true;
+        deployBtn.innerHTML = '<span>⏳</span> Deploying...';
+
+        try {
+            logCompiler('Requesting MetaMask signature...', 'system');
+            showNotification('Confirm deployment in MetaMask');
+
+            const factory = new ethers.ContractFactory(customCompiledData.abi, customCompiledData.bytecode, signer);
+            const deployed = await factory.deploy(50); 
+            
+            logCompiler('Transaction submitted. Mining...', 'system');
+            await deployed.waitForDeployment();
+            
+            const address = await deployed.getAddress();
+            logCompiler(`Deployed at ${address}`, 'success');
+            
+            localStorage.setItem('cbp_contract_address', address);
+            
+            logCompiler('Contract active. Reloading...', 'success');
+            showNotification('Contract Deployed Successfully', 'success');
+            
+            setTimeout(() => { window.location.reload(); }, 2000);
+            
+        } catch (err) {
+            logCompiler(`Deploy failed: ${err.message}`, 'error');
+            deployBtn.disabled = false;
+            deployBtn.innerHTML = origHTML;
+        }
+    };
+
+    // Console toggle
+    const toggleBtn = document.getElementById('toggle-console');
+    if (toggleBtn) {
+        toggleBtn.onclick = () => {
+            const console = document.getElementById('compiler-console');
+            console.classList.toggle('collapsed');
+            toggleBtn.textContent = console.classList.contains('collapsed') ? '▸' : '▾';
+            // Re-layout monaco to fill freed space
+            setTimeout(() => { if (monacoEditor) monacoEditor.layout(); }, 50);
+        };
+    }
+};
+
