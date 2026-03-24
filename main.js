@@ -222,7 +222,6 @@ async function fetchRates() {
 
 function bindConversionEvents() {
     const fiatInput    = document.getElementById('fiat-amount');
-    const currencySelect = document.getElementById('source-currency');
 
     let debounceTimer;
     const trigger = () => {
@@ -230,11 +229,7 @@ function bindConversionEvents() {
         debounceTimer = setTimeout(updateConversion, 300);
     };
 
-    fiatInput.addEventListener('input', trigger);
-    currencySelect.addEventListener('change', () => {
-        document.getElementById('currency-unit').textContent = currencySelect.value.toUpperCase();
-        trigger();
-    });
+    if (fiatInput) fiatInput.addEventListener('input', trigger);
 }
 
 async function updateConversion() {
@@ -381,7 +376,7 @@ async function broadcastPayload(e) {
     const target      = document.getElementById('recipient').value.trim();
     const fiatAmount  = parseFloat(document.getElementById('fiat-amount').value);
     const currency    = document.getElementById('source-currency').value;
-    const destCountry = document.getElementById('dest-country').value;
+    const destCountry = 'Global'; // Removed dest-country dropdown
 
     // ── Validate ──
     if (!target || !fiatAmount || fiatAmount <= 0) {
@@ -711,15 +706,31 @@ async function detectAndSetCountry() {
             localStorage.setItem(`cbp_country_${userAddress.toLowerCase()}`, JSON.stringify({ code, name }));
         }
 
-        // Auto-set the source-country dropdown
+        // Auto-set the source-country and currency
         const sel = document.getElementById('source-country');
-        if (sel && code) {
-            const option = Array.from(sel.options).find(o => o.value === code);
-            if (option) {
-                sel.value = code;
-                const lbl = sel.closest('.field-group')?.querySelector('label');
-                if (lbl) lbl.innerHTML = `Source Country <span class="geo-tag">● AUTO-DETECTED</span>`;
-            }
+        const disp = document.getElementById('source-country-display-text');
+        if (sel && disp && code) {
+            sel.value = code;
+            disp.textContent = name;
+            
+            // Auto-set currency based on country
+            const currencyMap = {
+                'IN': { code: 'inr', symbol: 'INR (₹)' },
+                'US': { code: 'usd', symbol: 'USD ($)' },
+                'UK': { code: 'gbp', symbol: 'GBP (£)' },
+                'GB': { code: 'gbp', symbol: 'GBP (£)' },
+                'EU': { code: 'eur', symbol: 'EUR (€)' },
+                'DE': { code: 'eur', symbol: 'EUR (€)' },
+                'FR': { code: 'eur', symbol: 'EUR (€)' },
+                'IT': { code: 'eur', symbol: 'EUR (€)' },
+            };
+            const curr = currencyMap[code] || { code: 'usd', symbol: 'USD ($)' }; // Default
+            document.getElementById('source-currency').value = curr.code;
+            const curDisp = document.getElementById('source-currency-display-text');
+            if (curDisp) curDisp.textContent = curr.symbol;
+            const curUnit = document.getElementById('currency-unit');
+            if (curUnit) curUnit.textContent = curr.code.toUpperCase();
+            if (typeof updateConversion === 'function') updateConversion();
         }
 
         // Show detected country badge in the identity panel
@@ -728,7 +739,7 @@ async function detectAndSetCountry() {
 
         pushLog(`Geo: Location resolved — ${name} (${code}).`, 'system');
     } catch (e) {
-        pushLog('Geo: Country auto-detection unavailable. Please select manually.', 'error');
+        pushLog('Geo: Country auto-detection unavailable or failed.', 'error');
     }
 }
 
@@ -808,15 +819,28 @@ window.overrideCountry = function(value) {
     }
     const [code, name] = value.split('|');
 
-    // Update source-country dropdown
+    // Update source-country and currency
     const sel = document.getElementById('source-country');
-    if (sel) {
-        const option = Array.from(sel.options).find(o => o.value === code);
-        if (option) {
-            sel.value = code;
-            const lbl = sel.closest('.field-group')?.querySelector('label');
-            if (lbl) lbl.innerHTML = `Source Country <span class="geo-tag">● DEMO OVERRIDE</span>`;
-        }
+    const disp = document.getElementById('source-country-display-text');
+    if (sel && disp && code) {
+        sel.value = code;
+        disp.textContent = name;
+        
+        // Auto-set currency based on country
+        const currencyMap = {
+            'IN': { code: 'inr', symbol: 'INR (₹)' },
+            'US': { code: 'usd', symbol: 'USD ($)' },
+            'UK': { code: 'gbp', symbol: 'GBP (£)' },
+            'GB': { code: 'gbp', symbol: 'GBP (£)' },
+            'EU': { code: 'eur', symbol: 'EUR (€)' },
+        };
+        const curr = currencyMap[code] || { code: 'usd', symbol: 'USD ($)' }; // Default
+        document.getElementById('source-currency').value = curr.code;
+        const curDisp = document.getElementById('source-currency-display-text');
+        if (curDisp) curDisp.textContent = curr.symbol;
+        const curUnit = document.getElementById('currency-unit');
+        if (curUnit) curUnit.textContent = curr.code.toUpperCase();
+        if (typeof updateConversion === 'function') updateConversion();
     }
 
     // Update identity badge

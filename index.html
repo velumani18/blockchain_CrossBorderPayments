@@ -243,44 +243,17 @@
                                     <div class="field-row">
                                         <div class="field-group flex-1">
                                             <label>Source Country</label>
-                                            <div class="field-input">
-                                                <select id="source-country">
-                                                    <option value="IN">India</option>
-                                                    <option value="US">United States</option>
-                                                    <option value="UK">United Kingdom</option>
-                                                    <option value="EU">Europe</option>
-                                                    <option value="JP">Japan</option>
-                                                    <option value="SG">Singapore</option>
-                                                    <option value="AU">Australia</option>
-                                                    <option value="CA">Canada</option>
-                                                </select>
+                                            <div class="field-input" style="background: var(--bg-secondary); padding: 12px; border-radius: 8px; border: 1px solid var(--border); display: flex; align-items: center; cursor: not-allowed;">
+                                                <span id="source-country-display-text" style="font-weight: 600; color: var(--text);">Detecting...</span>
+                                                <input type="hidden" id="source-country" value="US">
                                             </div>
                                         </div>
                                         <div class="field-group flex-1">
-                                            <label>Destination Country</label>
-                                            <div class="field-input">
-                                                <select id="dest-country">
-                                                    <option value="US">United States</option>
-                                                    <option value="IN">India</option>
-                                                    <option value="UK">United Kingdom</option>
-                                                    <option value="EU">Europe</option>
-                                                    <option value="JP">Japan</option>
-                                                    <option value="SG">Singapore</option>
-                                                    <option value="AU">Australia</option>
-                                                    <option value="CA">Canada</option>
-                                                </select>
+                                            <label>Currency</label>
+                                            <div class="field-input" style="background: var(--bg-secondary); padding: 12px; border-radius: 8px; border: 1px solid var(--border); display: flex; align-items: center; cursor: not-allowed;">
+                                                <span id="source-currency-display-text" style="font-weight: 600; color: var(--text);">--</span>
+                                                <input type="hidden" id="source-currency" value="usd">
                                             </div>
-                                        </div>
-                                    </div>
-                                    <div class="field-group">
-                                        <label>Currency</label>
-                                        <div class="field-input">
-                                            <select id="source-currency">
-                                                <option value="inr">INR (₹)</option>
-                                                <option value="usd">USD ($)</option>
-                                                <option value="eur">EUR (€)</option>
-                                                <option value="gbp">GBP (£)</option>
-                                            </select>
                                         </div>
                                     </div>
 
