@@ -619,7 +619,8 @@ async function broadcastPayload(e) {
             renderHistory();
             saveTransactions();
             txCount++;
-            document.getElementById('tx-total').textContent = txCount;
+            const txTotalEl = document.getElementById('tx-total');
+            if (txTotalEl) txTotalEl.textContent = txCount;
             document.getElementById('payment-form').reset();
             document.getElementById('conversion-display').classList.add('hidden');
             document.getElementById('currency-unit').textContent = 'INR';
@@ -872,7 +873,8 @@ async function refreshTelemetry() {
             (eth * rate).toLocaleString(locale, { style: 'currency', currency: currencyFormat });
 
         const net = await provider.getNetwork();
-        document.getElementById('chain-id').textContent = net.chainId.toString();
+        const chainIdEl = document.getElementById('chain-id');
+        if (chainIdEl) chainIdEl.textContent = net.chainId.toString();
     } catch (e) { /* silent */ }
 }
 
