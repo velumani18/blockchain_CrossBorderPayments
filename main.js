@@ -252,7 +252,7 @@ function bindConversionEvents() {
         trigger();
     });
     assetSelect.addEventListener('change', () => {
-        if (assetSelect.value === 'ETH') {
+        if (assetSelect.value === 'ETH' || !contract) {
             approveBtn.classList.add('hidden');
             document.getElementById('send-payment').disabled = !signer;
         } else {
@@ -350,17 +350,23 @@ function updateContractBadge() {
     const text  = document.getElementById('contract-badge-text');
     const mode  = document.getElementById('sc-mode');
     const fee   = document.getElementById('sc-fee');
+    const approveBtn = document.getElementById('approve-token');
+    const assetSelect = document.getElementById('transfer-asset');
 
     if (contract) {
         badge.classList.add('active');
         text.textContent = 'Smart Contract';
         mode.textContent = 'Contract Routed';
         fee.textContent  = '0.5%';
+        if (assetSelect && assetSelect.value !== 'ETH') {
+            if (approveBtn) approveBtn.classList.remove('hidden');
+        }
     } else {
         badge.classList.remove('active');
         text.textContent = 'Direct Mode';
         mode.textContent = 'Direct Transfer';
         fee.textContent  = '0% (Direct)';
+        if (approveBtn) approveBtn.classList.add('hidden');
     }
 
     // Show deploy when wallet connected + no contract; show revert when contract is active
@@ -369,9 +375,13 @@ function updateContractBadge() {
     if (deployBtn) deployBtn.classList.toggle('hidden', !!contract || !signer);
     if (revertBtn) revertBtn.classList.toggle('hidden', !contract || !signer);
 
-    // Allow sending payments even in direct mode (no contract required)
+    // Allow sending payments even in direct mode
     const sendBtn = document.getElementById('send-payment');
-    if (sendBtn && signer) sendBtn.disabled = false;
+    if (contract && assetSelect && assetSelect.value !== 'ETH') {
+        if (sendBtn) sendBtn.disabled = true;
+    } else {
+        if (sendBtn && signer) sendBtn.disabled = false;
+    }
 }
 
 function revertToDirect() {
@@ -545,29 +555,36 @@ async function broadcastPayload(e) {
 
         let tx;
         if (!contract) {
-            pushLog('Engine: Smart Contract required. Please deploy the contract first.', 'error');
-            showNotification('Deploy the Smart Contract first!', 'error');
-            setEngineState(false);
-            return;
-        }
-
-        const sourceCountry = document.getElementById('source-country').value;
-        pushLog(`Engine: Routing ${asset} via smart contract...`, 'engine');
-
-        if (isERC20) {
-            const amountWei = ethers.parseUnits(strAmount, decimals);
-            tx = await contract.sendTokenPayment(
-                SUPPORTED_TOKENS[asset],
-                target,
-                amountWei,
-                currency.toUpperCase(),
-                sourceCountry,
-                destCountry
-            );
+            pushLog(`Engine: Smart Contract missing. Initiating DIRECT P2P Transfer...`, 'engine');
+            if (isERC20) {
+                const amountWei = ethers.parseUnits(strAmount, decimals);
+                const tokenContract = new ethers.Contract(SUPPORTED_TOKENS[asset], ERC20_ABI, signer);
+                tx = await tokenContract.transfer(target, amountWei);
+            } else {
+                tx = await signer.sendTransaction({
+                    to: target,
+                    value: ethers.parseEther(strAmount)
+                });
+            }
         } else {
-            tx = await contract.sendPayment(target, currency.toUpperCase(), sourceCountry, destCountry, {
-                value: ethers.parseEther(strAmount)
-            });
+            const sourceCountry = document.getElementById('source-country').value;
+            pushLog(`Engine: Routing ${asset} via smart contract...`, 'engine');
+
+            if (isERC20) {
+                const amountWei = ethers.parseUnits(strAmount, decimals);
+                tx = await contract.sendTokenPayment(
+                    SUPPORTED_TOKENS[asset],
+                    target,
+                    amountWei,
+                    currency.toUpperCase(),
+                    sourceCountry,
+                    destCountry
+                );
+            } else {
+                tx = await contract.sendPayment(target, currency.toUpperCase(), sourceCountry, destCountry, {
+                    value: ethers.parseEther(strAmount)
+                });
+            }
         }
 
         setEngineState(true, 'Awaiting settlement verification (Mining)...');
