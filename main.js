@@ -466,8 +466,8 @@ async function broadcastPayload(e) {
    ═══════════════════════════════════════════════════════════════════════ */
 window.setLedgerTab = function(tab) {
     ledgerTab = tab;
-    document.getElementById('tab-sent').style.background = tab === 'sent' ? 'var(--bg)' : 'transparent';
-    document.getElementById('tab-received').style.background = tab === 'received' ? 'var(--bg)' : 'transparent';
+    document.getElementById('tab-sent').style.background = tab === 'sent' ? 'var(--card-bg)' : 'transparent';
+    document.getElementById('tab-received').style.background = tab === 'received' ? 'var(--card-bg)' : 'transparent';
     if (tab === 'received') window.dismissReceivedBanner(); // Mark as seen when user opens received tab
     renderHistory();
 };
@@ -633,6 +633,7 @@ function renderHistory() {
             : '—';
         
         const toCountryDisplay = (ledgerTab === 'sent') ? 'Global' : (t.country || '—');
+        const fromCountryDisplay = (ledgerTab === 'received') ? 'Global' : (t.sourceCountry || '—');
 
         return `
         <tr>
@@ -642,7 +643,7 @@ function renderHistory() {
             </td>
             <td>${t.date || ''} ${t.time}</td>
             <td class="mono fs-11" title="${senderDisplay}">${shortAddr(senderDisplay)}</td>
-            <td><span class="country-chip">${t.sourceCountry || '—'}</span></td>
+            <td><span class="country-chip">${fromCountryDisplay}</span></td>
             <td class="mono fs-11" title="${receiverDisplay}">${shortAddr(receiverDisplay)}</td>
             <td><span class="country-chip">${toCountryDisplay}</span></td>
             <td>${t.fiatAmount}</td>
