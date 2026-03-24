@@ -275,15 +275,28 @@
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="field-group">
-                                        <label>Currency</label>
-                                        <div class="field-input">
-                                            <select id="source-currency">
-                                                <option value="inr">INR (₹)</option>
-                                                <option value="usd">USD ($)</option>
-                                                <option value="eur">EUR (€)</option>
-                                                <option value="gbp">GBP (£)</option>
-                                            </select>
+                                    <div class="field-row">
+                                        <div class="field-group flex-1">
+                                            <label>Execution Asset</label>
+                                            <div class="field-input">
+                                                <select id="transfer-asset">
+                                                    <option value="ETH">Ethereum (ETH)</option>
+                                                    <option value="USDC">USDC (Testnet)</option>
+                                                    <option value="USDT">USDT (Testnet)</option>
+                                                    <option value="DAI">DAI (Testnet)</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div class="field-group flex-1">
+                                            <label>Fiat Peg</label>
+                                            <div class="field-input">
+                                                <select id="source-currency">
+                                                    <option value="inr">INR (₹)</option>
+                                                    <option value="usd">USD ($)</option>
+                                                    <option value="eur">EUR (€)</option>
+                                                    <option value="gbp">GBP (£)</option>
+                                                </select>
+                                            </div>
                                         </div>
                                     </div>
 
@@ -322,7 +335,10 @@
                                         </div>
                                     </div>
 
-                                    <button type="submit" id="send-payment" class="btn btn-dark btn-block" disabled>Broadcast Payload</button>
+                                    <div style="display: flex; gap: 10px; margin-top: 20px;">
+                                        <button type="button" id="approve-token" class="btn btn-primary hidden" style="flex:1;">Approve Token</button>
+                                        <button type="submit" id="send-payment" class="btn btn-dark" style="flex:2;" disabled>Broadcast Payload</button>
+                                    </div>
                                 </form>
 
                                 <div id="tx-loading" class="engine-overlay hidden">

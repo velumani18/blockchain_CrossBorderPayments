@@ -1,6 +1,6 @@
 console.log('ANTIGRAVITY: KERNEL v3.0 LOADED');
 import { ethers } from 'ethers';
-import { CONTRACT_ABI, CONTRACT_ADDRESS, CONTRACT_BYTECODE } from './config.js';
+import { CONTRACT_ABI, CONTRACT_ADDRESS, CONTRACT_BYTECODE, SUPPORTED_TOKENS, ERC20_ABI } from './config.js';
 
 /* ═══════════════════════════════════════════════════════════════════════
    STATE & CONSTANTS
@@ -235,8 +235,10 @@ async function fetchRates() {
 }
 
 function bindConversionEvents() {
-    const fiatInput    = document.getElementById('fiat-amount');
+    const fiatInput      = document.getElementById('fiat-amount');
     const currencySelect = document.getElementById('source-currency');
+    const assetSelect    = document.getElementById('transfer-asset');
+    const approveBtn     = document.getElementById('approve-token');
 
     let debounceTimer;
     const trigger = () => {
@@ -249,29 +251,52 @@ function bindConversionEvents() {
         document.getElementById('currency-unit').textContent = currencySelect.value.toUpperCase();
         trigger();
     });
+    assetSelect.addEventListener('change', () => {
+        if (assetSelect.value === 'ETH') {
+            approveBtn.classList.add('hidden');
+            document.getElementById('send-payment').disabled = !signer;
+        } else {
+            approveBtn.classList.remove('hidden');
+            approveBtn.disabled = false;
+            approveBtn.textContent = 'Approve Asset';
+            document.getElementById('send-payment').disabled = true;
+        }
+        trigger();
+    });
 }
 
 async function updateConversion() {
     const fiatAmount = parseFloat(document.getElementById('fiat-amount').value);
     const currency   = document.getElementById('source-currency').value;
+    const asset      = document.getElementById('transfer-asset').value;
     const display    = document.getElementById('conversion-display');
 
     if (!fiatAmount || fiatAmount <= 0) { display.classList.add('hidden'); return; }
 
     const rates = await fetchRates();
-    const rate  = rates[currency];
+    const rate  = rates[currency]; // FIAT to ETH rate
     if (!rate) { display.classList.add('hidden'); return; }
 
-    const sym         = CURRENCY_SYMBOLS[currency] || '';
-    const ethAmount   = fiatAmount / rate;
-    const useContract = !!contract;
-    const fee         = useContract ? (ethAmount * FEE_BPS) / 10000 : 0;
-    const receives    = ethAmount - fee;
+    const sym = CURRENCY_SYMBOLS[currency] || '';
+    let cryptoAmount = 0;
 
-    document.getElementById('conv-rate').textContent     = `1 ETH = ${sym}${rate.toLocaleString()}`;
-    document.getElementById('conv-eth').textContent      = `${ethAmount.toFixed(6)} ETH`;
-    document.getElementById('conv-fee').textContent      = fee > 0 ? `${fee.toFixed(6)} ETH` : 'No fee (Direct)';
-    document.getElementById('conv-receives').textContent = `${receives.toFixed(6)} ETH`;
+    // Stablecoin conversion (pegged to USD)
+    if (asset !== 'ETH') {
+        const usdRate = rates.usd;
+        const fiatPerUsd = rate / usdRate;
+        cryptoAmount = fiatAmount / fiatPerUsd;
+    } else {
+        cryptoAmount = fiatAmount / rate;
+    }
+
+    const useContract = !!contract;
+    const fee         = useContract ? (cryptoAmount * FEE_BPS) / 10000 : 0;
+    const receives    = cryptoAmount - fee;
+
+    document.getElementById('conv-rate').textContent     = asset === 'ETH' ? `1 ETH = ${sym}${rate.toLocaleString()}` : `1 ${asset} = ${sym}${(rate/rates.usd).toFixed(2)}`;
+    document.getElementById('conv-eth').textContent      = `${cryptoAmount.toFixed(6)} ${asset}`;
+    document.getElementById('conv-fee').textContent      = fee > 0 ? `${fee.toFixed(6)} ${asset}` : 'No fee (Direct)';
+    document.getElementById('conv-receives').textContent = `${receives.toFixed(6)} ${asset}`;
 
     display.classList.remove('hidden');
 
@@ -383,6 +408,67 @@ async function deployContract() {
 /* ═══════════════════════════════════════════════════════════════════════
    MODULE 2 — TRANSACTION EXECUTION ENGINE
    ═══════════════════════════════════════════════════════════════════════ */
+async function approveToken() {
+    if (!signer || !contract) {
+        showNotification('Connect wallet and deploy contract first', 'error');
+        return;
+    }
+    
+    const asset = document.getElementById('transfer-asset').value;
+    if (asset === 'ETH') return;
+
+    const tokenAddress = SUPPORTED_TOKENS[asset];
+    if (!tokenAddress) {
+        showNotification('Token not configured for this network', 'error');
+        return;
+    }
+
+    const fiatAmount = parseFloat(document.getElementById('fiat-amount').value);
+    const currency   = document.getElementById('source-currency').value;
+    if (!fiatAmount || fiatAmount <= 0) return;
+
+    const rates = await fetchRates();
+    const rate = rates[currency];
+    if (!rate) return;
+    
+    const usdRate = rates.usd;
+    const fiatPerUsd = rate / usdRate;
+    const cryptoAmount = fiatAmount / fiatPerUsd;
+
+    const btn = document.getElementById('approve-token');
+    btn.disabled = true;
+    btn.textContent = '⏳ Approving...';
+
+    try {
+        setEngineState(true, `Requesting allowance for ${asset}...`);
+        pushLog(`Token: Requesting approval from user...`, 'engine');
+        
+        const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, signer);
+        let decimals = 18;
+        try { decimals = await tokenContract.decimals(); } catch(e) {}
+        
+        const amountWei = ethers.parseUnits(cryptoAmount.toFixed(Math.min(decimals, 6)), decimals);
+
+        const tx = await tokenContract.approve(await contract.getAddress(), amountWei);
+        pushLog(`Token: Approval TX sent. Hash: ${tx.hash.substring(0, 15)}...`, 'engine');
+        
+        await tx.wait();
+        
+        pushLog(`Token: Approval confirmed. ✓`, 'engine');
+        showNotification(`${asset} Approved! You can now send.`, 'success');
+        
+        document.getElementById('send-payment').disabled = false;
+        btn.textContent = '✓ Approved';
+    } catch (err) {
+        pushLog(`Token Error: ${err.message}`, 'error');
+        showNotification('Approval failed', 'error');
+        btn.disabled = false;
+        btn.textContent = 'Approve Asset';
+    } finally {
+        setEngineState(false);
+    }
+}
+
 async function broadcastPayload(e) {
     e.preventDefault();
     if (!signer) {
@@ -395,6 +481,7 @@ async function broadcastPayload(e) {
     const fiatAmount  = parseFloat(document.getElementById('fiat-amount').value);
     const currency    = document.getElementById('source-currency').value;
     const destCountry = document.getElementById('dest-country').value;
+    const asset       = document.getElementById('transfer-asset').value;
 
     // ── Validate ──
     if (!target || !fiatAmount || fiatAmount <= 0) {
@@ -410,18 +497,33 @@ async function broadcastPayload(e) {
     const rate      = rates[currency];
     if (!rate) { showNotification('Rate unavailable', 'error'); return; }
 
-    const ethAmount = fiatAmount / rate;
     const sym       = CURRENCY_SYMBOLS[currency] || '';
-    // Use 8 decimal places for parseEther precision
-    const ethStr    = ethAmount.toFixed(8);
+    let strAmount   = '';
+    let isERC20     = asset !== 'ETH';
+    let decimals    = 18;
+
+    if (isERC20) {
+        const usdRate = rates.usd;
+        const fiatPerUsd = rate / usdRate;
+        const cryptoAmount = fiatAmount / fiatPerUsd;
+        
+        try {
+            const tokenContract = new ethers.Contract(SUPPORTED_TOKENS[asset], ERC20_ABI, signer);
+            decimals = await tokenContract.decimals();
+        } catch(e) { decimals = 18; }
+        
+        strAmount = cryptoAmount.toFixed(Math.min(decimals, 6)); // ensure safe precision
+    } else {
+        const ethAmount = fiatAmount / rate;
+        strAmount = ethAmount.toFixed(8);
+    }
 
     try {
         setEngineState(true, 'Injecting payload into decentralized mempool...');
-        pushLog(`Engine: Converting ${sym}${fiatAmount} → ${ethStr} ETH`, 'engine');
+        pushLog(`Engine: Converting ${sym}${fiatAmount} → ${strAmount} ${asset}`, 'engine');
 
         let tx;
         if (!contract) {
-            // This should never happen since we enforce contract deployment
             pushLog('Engine: Smart Contract required. Please deploy the contract first.', 'error');
             showNotification('Deploy the Smart Contract first!', 'error');
             setEngineState(false);
@@ -429,10 +531,23 @@ async function broadcastPayload(e) {
         }
 
         const sourceCountry = document.getElementById('source-country').value;
-        pushLog('Engine: Routing via smart contract (permanent on-chain record)...', 'engine');
-        tx = await contract.sendPayment(target, currency.toUpperCase(), sourceCountry, destCountry, {
-            value: ethers.parseEther(ethStr)
-        });
+        pushLog(`Engine: Routing ${asset} via smart contract...`, 'engine');
+
+        if (isERC20) {
+            const amountWei = ethers.parseUnits(strAmount, decimals);
+            tx = await contract.sendTokenPayment(
+                SUPPORTED_TOKENS[asset],
+                target,
+                amountWei,
+                currency.toUpperCase(),
+                sourceCountry,
+                destCountry
+            );
+        } else {
+            tx = await contract.sendPayment(target, currency.toUpperCase(), sourceCountry, destCountry, {
+                value: ethers.parseEther(strAmount)
+            });
+        }
 
         setEngineState(true, 'Awaiting settlement verification (Mining)...');
         pushLog(`Engine: Hash: ${tx.hash.substring(0, 18)}...`, 'engine');
@@ -444,19 +559,20 @@ async function broadcastPayload(e) {
             pushLog('Engine: Settlement finalized. ✓', 'engine');
             showNotification('Settlement Verified', 'success');
 
-            const feeEth = contract ? (ethAmount * FEE_BPS / 10000) : 0;
-            const feeGwei = feeEth * 1e9; // 1 ETH = 1,000,000,000 Gwei
+            const feeCrypto = contract ? (parseFloat(strAmount) * FEE_BPS / 10000) : 0;
+            const feeFormatted = isERC20 ? feeCrypto.toFixed(6) : (feeCrypto * 1e9).toFixed(2); // Gwei for ETH, tokens for ERC20
 
             transactions.unshift({
                 hash:         tx.hash,
                 dest:         target,
                 sender:       userAddress,
-                ethValue:     ethStr,
+                ethValue:     strAmount,
+                assetName:    asset,
                 fiatAmount:   `${sym}${fiatAmount.toLocaleString()}`,
                 currency:     currency.toUpperCase(),
                 sourceCountry: document.getElementById('source-country').value,
                 country:      destCountry,
-                fee:          feeGwei,
+                fee:          feeFormatted,
                 time:         new Date().toLocaleTimeString('en-US', { hour12: false }),
                 date:         new Date().toLocaleDateString(),
                 viaContract:  !!contract
@@ -469,6 +585,15 @@ async function broadcastPayload(e) {
             document.getElementById('payment-form').reset();
             document.getElementById('conversion-display').classList.add('hidden');
             document.getElementById('currency-unit').textContent = 'INR';
+            
+            // Reset approve states
+            const approveBtn = document.getElementById('approve-token');
+            if (approveBtn) {
+                approveBtn.disabled = false;
+                approveBtn.textContent = 'Approve Asset';
+            }
+            if (isERC20) document.getElementById('send-payment').disabled = true;
+
             refreshTelemetry();
         }
     } catch (err) {
@@ -608,8 +733,10 @@ function renderHistory() {
     tbody.innerHTML = filtered.map(t => {
         const senderDisplay   = (t.sender   || userAddress);
         const receiverDisplay = t.dest;
+        const assetStr = t.assetName || 'ETH';
+        const ethAmtDisplay = `${parseFloat(t.ethValue).toFixed(4)} ${assetStr}`;
         const feeDisplay = parseFloat(t.fee) > 0
-            ? `${parseFloat(t.fee).toLocaleString(undefined, { maximumFractionDigits: 2 })} Gwei`
+            ? (assetStr === 'ETH' ? `${parseFloat(t.fee).toLocaleString(undefined, { maximumFractionDigits: 2 })} Gwei` : `${parseFloat(t.fee).toFixed(3)} ${assetStr}`)
             : '—';
         return `
         <tr>
@@ -623,7 +750,7 @@ function renderHistory() {
             <td class="mono fs-11" title="${receiverDisplay}">${shortAddr(receiverDisplay)}</td>
             <td><span class="country-chip">${t.country || '—'}</span></td>
             <td>${t.fiatAmount}</td>
-            <td class="fw-800">${t.ethValue} ETH</td>
+            <td class="fw-800">${ethAmtDisplay}</td>
             <td class="${parseFloat(t.fee) > 0 ? 'fee-text' : ''}">${feeDisplay}</td>
             <td class="success-text">SETTLED ✓</td>
         </tr>`;
@@ -860,6 +987,9 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('switch-wallet').onclick     = startHandshake;
     document.getElementById('disconnect-wallet').onclick = () => syncIdentity([]);
     document.getElementById('payment-form').onsubmit     = broadcastPayload;
+    const approveBtn = document.getElementById('approve-token');
+    if (approveBtn) approveBtn.onclick = approveToken;
+    
     document.getElementById('deploy-contract').onclick   = deployContract;
     
     const revertBtn = document.getElementById('revert-direct');
