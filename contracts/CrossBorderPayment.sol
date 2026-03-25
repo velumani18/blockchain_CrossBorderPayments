@@ -116,6 +116,33 @@ contract CrossBorderPayment {
         emit BlacklistUpdated(_account, _status);
     }
 
+    // ── Internal helper to record payment (reduces stack depth) ─────────
+    function _recordPayment(
+        address _token,
+        address _sender,
+        address _receiver,
+        uint256 _amount,
+        uint256 _fee,
+        string calldata _sourceCurrency,
+        string calldata _sourceCountry,
+        string calldata _destCountry
+    ) internal returns (uint256 paymentId) {
+        paymentId = payments.length;
+        payments.push(Payment({
+            token:          _token,
+            sender:         _sender,
+            receiver:       _receiver,
+            amount:         _amount,
+            fee:            _fee,
+            timestamp:      block.timestamp,
+            sourceCurrency: _sourceCurrency,
+            sourceCountry:  _sourceCountry,
+            destCountry:    _destCountry
+        }));
+        userPaymentIds[_sender].push(paymentId);
+        userPaymentIds[_receiver].push(paymentId);
+    }
+
     // ── Core: Send Payment ──────────────────────────────────────────────
     /**
      * @notice Send ETH to a receiver, deducting a platform fee.
@@ -136,7 +163,6 @@ contract CrossBorderPayment {
         notBlacklisted(msg.sender)
         notBlacklisted(_receiver) 
     {
-        // ── Checks ──
         require(msg.value >= minTransactionAmount, "Amount below minimum threshold");
         require(msg.value <= maxTransactionAmount, "Amount exceeds maximum threshold");
         require(_receiver != address(0), "Invalid receiver address");
@@ -144,39 +170,21 @@ contract CrossBorderPayment {
 
         uint256 fee = (msg.value * feePercentage) / 10000;
         uint256 transferAmount = msg.value - fee;
-
-        // ── Effects (state changes BEFORE external call) ──
-        uint256 paymentId = payments.length;
-        payments.push(Payment({
-            token:          address(0),
-            sender:         msg.sender,
-            receiver:       _receiver,
-            amount:         msg.value,
-            fee:            fee,
-            timestamp:      block.timestamp,
-            sourceCurrency: _sourceCurrency,
-            sourceCountry:  _sourceCountry,
-            destCountry:    _destCountry
-        }));
-
-        userPaymentIds[msg.sender].push(paymentId);
-        userPaymentIds[_receiver].push(paymentId);
         totalFeesCollected += fee;
 
-        // ── Interactions (external call AFTER state changes) ──
+        uint256 paymentId = _recordPayment(
+            address(0), msg.sender, _receiver,
+            msg.value, fee,
+            _sourceCurrency, _sourceCountry, _destCountry
+        );
+
         (bool success, ) = _receiver.call{value: transferAmount}("");
         require(success, "Transfer to receiver failed");
 
         emit PaymentSent(
-            paymentId,
-            address(0),
-            msg.sender,
-            _receiver,
-            msg.value,
-            fee,
-            _sourceCurrency,
-            _sourceCountry,
-            _destCountry,
+            paymentId, address(0), msg.sender, _receiver,
+            msg.value, fee,
+            _sourceCurrency, _sourceCountry, _destCountry,
             block.timestamp
         );
     }
@@ -186,7 +194,7 @@ contract CrossBorderPayment {
      * @notice Send ERC20 Token to a receiver, deducting a platform fee.
      */
     function sendTokenPayment(
-        IERC20 _token,
+        address _token,
         address _receiver,
         uint256 _amount,
         string calldata _sourceCurrency,
@@ -198,47 +206,27 @@ contract CrossBorderPayment {
         notBlacklisted(msg.sender)
         notBlacklisted(_receiver) 
     {
-        // ── Checks ──
-        require(_amount >= minTransactionAmount, "Amount below minimum threshold");
-        require(_amount <= maxTransactionAmount, "Amount exceeds maximum threshold");
+        require(_amount > 0, "Zero amount");
         require(_receiver != address(0), "Invalid receiver address");
         require(_receiver != msg.sender, "Cannot send to yourself");
+        require(_token != address(0), "Invalid token address");
 
         uint256 fee = (_amount * feePercentage) / 10000;
         uint256 transferAmount = _amount - fee;
 
-        // ── Effects ──
-        uint256 paymentId = payments.length;
-        payments.push(Payment({
-            token:          address(_token),
-            sender:         msg.sender,
-            receiver:       _receiver,
-            amount:         _amount,
-            fee:            fee,
-            timestamp:      block.timestamp,
-            sourceCurrency: _sourceCurrency,
-            sourceCountry:  _sourceCountry,
-            destCountry:    _destCountry
-        }));
+        uint256 paymentId = _recordPayment(
+            _token, msg.sender, _receiver,
+            _amount, fee,
+            _sourceCurrency, _sourceCountry, _destCountry
+        );
 
-        userPaymentIds[msg.sender].push(paymentId);
-        userPaymentIds[_receiver].push(paymentId);
-        // Note: For tokens, fees accumulate as token balances on the contract.
-
-        // ── Interactions ──
-        require(_token.transferFrom(msg.sender, address(this), fee), "Fee transfer failed");
-        require(_token.transferFrom(msg.sender, _receiver, transferAmount), "Payment transfer failed");
+        require(IERC20(_token).transferFrom(msg.sender, address(this), fee), "Fee transfer failed");
+        require(IERC20(_token).transferFrom(msg.sender, _receiver, transferAmount), "Payment transfer failed");
 
         emit PaymentSent(
-            paymentId,
-            address(_token),
-            msg.sender,
-            _receiver,
-            _amount,
-            fee,
-            _sourceCurrency,
-            _sourceCountry,
-            _destCountry,
+            paymentId, _token, msg.sender, _receiver,
+            _amount, fee,
+            _sourceCurrency, _sourceCountry, _destCountry,
             block.timestamp
         );
     }
@@ -254,13 +242,13 @@ contract CrossBorderPayment {
         emit FeeWithdrawn(address(0), owner, balance);
     }
 
-    function withdrawTokenFees(IERC20 _token) external onlyOwner {
-        uint256 balance = _token.balanceOf(address(this));
+    function withdrawTokenFees(address _token) external onlyOwner {
+        uint256 balance = IERC20(_token).balanceOf(address(this));
         require(balance > 0, "No tokens to withdraw");
 
-        require(_token.transfer(owner, balance), "Withdrawal failed");
+        require(IERC20(_token).transfer(owner, balance), "Withdrawal failed");
 
-        emit FeeWithdrawn(address(_token), owner, balance);
+        emit FeeWithdrawn(_token, owner, balance);
     }
 
     // ── View Functions ──────────────────────────────────────────────────

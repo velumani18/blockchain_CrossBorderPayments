@@ -48,6 +48,11 @@ self.onmessage = function(e) {
                     }
                 },
                 settings: {
+                    viaIR: true,
+                    optimizer: {
+                        enabled: true,
+                        runs: 200
+                    },
                     outputSelection: {
                         '*': {
                             '*': ['abi', 'evm.bytecode.object']
@@ -70,23 +75,31 @@ self.onmessage = function(e) {
             // Extract the requested contract
             const contracts = output.contracts['Contract.sol'];
             let targetContract = null;
+            let finalName = '';
             
             if (contractName && contracts[contractName]) {
                 targetContract = contracts[contractName];
+                finalName = contractName;
             } else {
-                // If not specified, pick the last one (usually main contract)
-                const keys = Object.keys(contracts);
-                targetContract = contracts[keys[keys.length - 1]];
+                // If not specified, pick the contract with the longest bytecode (skips interfaces)
+                let maxLen = -1;
+                for (const key of Object.keys(contracts)) {
+                    const bc = contracts[key].evm?.bytecode?.object || '';
+                    if (bc.length > maxLen) {
+                        maxLen = bc.length;
+                        targetContract = contracts[key];
+                        finalName = key;
+                    }
+                }
             }
             
-            if (!targetContract) {
-                self.postMessage({ id, type: 'ERROR', error: 'Contract compilation yielded no output.' });
+            if (!targetContract || !targetContract.evm?.bytecode?.object) {
+                self.postMessage({ id, type: 'ERROR', error: 'Contract compilation yielded no output bytecode.' });
                 return;
             }
             
             const abi = targetContract.abi;
             const bytecode = targetContract.evm.bytecode.object;
-            const finalName = contractName || Object.keys(contracts).pop();
             
             self.postMessage({
                 id,

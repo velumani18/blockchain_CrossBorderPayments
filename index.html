@@ -346,8 +346,8 @@
                             <button id="compile-btn" class="ide-btn ide-btn-compile">
                                 <span>⚙️</span> Compile
                             </button>
-                            <button id="deploy-custom-btn" class="ide-btn ide-btn-deploy" disabled>
-                                <span>🚀</span> Deploy
+                            <button id="deploy-custom-btn" class="ide-btn ide-btn-deploy" disabled title="Compile first, then use the sidebar Deploy Contract button">
+                                <span>🚀</span> Deploy (via Sidebar)
                             </button>
                         </div>
                     </div>
@@ -388,8 +388,8 @@
                                     <p class="ledger-subtitle" id="ledger-count">0 transactions recorded</p>
                                 </div>
                                 <div class="ledger-tabs" style="display: flex; gap: 8px; background: var(--bg-color); padding: 4px; border-radius: 8px;">
-                                    <button id="tab-sent" class="btn btn-sm active" style="border-radius: 6px; border: 1px solid var(--border-color); padding: 6px 12px; cursor: pointer; background: var(--card-bg); font-weight: 600;">Sent</button>
-                                    <button id="tab-received" class="btn btn-sm" style="border-radius: 6px; border: 1px solid var(--border-color); padding: 6px 12px; cursor: pointer; background: transparent; font-weight: 600;">Received</button>
+                                    <button id="tab-sent" class="btn btn-sm active" style="border-radius: 6px; border: 1px solid var(--border); padding: 6px 12px; cursor: pointer; background: var(--card-bg); font-weight: 600;">Sent</button>
+                                    <button id="tab-received" class="btn btn-sm" style="border-radius: 6px; border: 1px solid var(--border); padding: 6px 12px; cursor: pointer; background: transparent; font-weight: 600;">Received</button>
                                 </div>
                             </div>
                         </div>
@@ -421,6 +421,10 @@
             </main>
         </div>
     </div>
+
+    <!-- Hidden tracking elements referenced by main.js -->
+    <span id="tx-total" style="display:none">0</span>
+    <span id="chain-id" style="display:none">--</span>
 
     <div id="notification-area"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/loader.min.js"></script>

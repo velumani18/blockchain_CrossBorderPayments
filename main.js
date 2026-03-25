@@ -392,7 +392,7 @@ function revertToDirect() {
     pushLog('Contract: Routing deactivated. Switching to standard wallet transfers.', 'system');
 }
 
-async function deployContract() {
+async function deployContract(compiledData = null) {
     if (!signer) {
         showNotification('Connect wallet first', 'error');
         return;
@@ -403,14 +403,17 @@ async function deployContract() {
     }
 
     const deployBtn = document.getElementById('deploy-contract');
-    deployBtn.disabled = true;
-    deployBtn.textContent = '⏳ Deploying...';
+    if (deployBtn) { deployBtn.disabled = true; deployBtn.textContent = '⏳ Deploying...'; }
+
+    // Use custom compiled data from IDE if provided, else default from config.js
+    const abi      = compiledData ? compiledData.abi      : CONTRACT_ABI;
+    const bytecode = compiledData ? compiledData.bytecode : CONTRACT_BYTECODE;
 
     try {
         pushLog('Contract: Deploying smart contract via MetaMask...', 'engine');
         showNotification('Confirm deployment in MetaMask');
 
-        const factory = new ethers.ContractFactory(CONTRACT_ABI, CONTRACT_BYTECODE, signer);
+        const factory  = new ethers.ContractFactory(abi, bytecode, signer);
         const deployed = await factory.deploy(50); // 50 basis points = 0.5% fee
 
         pushLog(`Contract: TX sent. Waiting for confirmation...`, 'engine');
@@ -419,11 +422,8 @@ async function deployContract() {
         const address = await deployed.getAddress();
         pushLog(`Contract: Deployed at ${address}`, 'engine');
 
-        // Save to localStorage so it persists
         localStorage.setItem('cbp_contract_address', address);
-
-        // Activate the contract
-        contract = new ethers.Contract(address, CONTRACT_ABI, signer);
+        contract = new ethers.Contract(address, abi, signer);
         updateContractBadge();
 
         showNotification('Smart Contract Deployed! ✓', 'success');
@@ -431,8 +431,7 @@ async function deployContract() {
     } catch (e) {
         pushLog(`Contract: Deployment failed — ${e.message}`, 'error');
         showNotification('Deployment failed', 'error');
-        deployBtn.disabled = false;
-        deployBtn.textContent = '🚀 Deploy Contract';
+        if (deployBtn) { deployBtn.disabled = false; deployBtn.textContent = '🚀 Deploy Contract'; }
     }
 }
 
@@ -892,8 +891,15 @@ function startGlobalTelemetry() {
 
     // Fetch real rates on startup
     fetchRates().then(rates => {
-        if (rates.usd) document.getElementById('eth-price-val').textContent = `$${rates.usd.toLocaleString()}`;
-        if (rates.inr) document.getElementById('eth-inr-val').textContent   = `₹${rates.inr.toLocaleString()}`;
+        // Update sidebar market intelligence panel with live rates
+        const primaryVal = document.getElementById('market-primary-val');
+        const secondaryVal = document.getElementById('market-secondary-val');
+        const primaryLabel = document.getElementById('market-primary-label');
+        const secondaryLabel = document.getElementById('market-secondary-label');
+        if (primaryLabel) primaryLabel.textContent = 'ETH / USD';
+        if (primaryVal && rates.usd) primaryVal.textContent = `$${rates.usd.toLocaleString()}`;
+        if (secondaryLabel) secondaryLabel.textContent = 'ETH / INR';
+        if (secondaryVal && rates.inr) secondaryVal.textContent = `\u20B9${rates.inr.toLocaleString()}`;
     });
 
     // Background heartbeat
@@ -1137,7 +1143,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const approveBtn = document.getElementById('approve-token');
     if (approveBtn) approveBtn.onclick = approveToken;
     
-    document.getElementById('deploy-contract').onclick   = deployContract;
+    document.getElementById('deploy-contract').onclick   = () => deployContract();
     
     const revertBtn = document.getElementById('revert-direct');
     if (revertBtn) revertBtn.onclick = revertToDirect;
@@ -1164,6 +1170,13 @@ let customCompiledData = null;
 const defaultContractSource = `// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+// ── Minimal ERC20 interface (outside contract) ──
+interface IERC20 {
+    function transfer(address to, uint256 value) external returns (bool);
+    function transferFrom(address from, address to, uint256 value) external returns (bool);
+    function balanceOf(address account) external view returns (uint256);
+}
+
 /**
  * @title CrossBorderPayment
  * @dev Re-engineered for maximum security and compliance with
@@ -1189,12 +1202,14 @@ contract CrossBorderPayment {
     mapping(address => bool) public isBlacklisted;
 
     struct Payment {
+        address token;  // address(0) for ETH
         address sender;
         address receiver;
         uint256 amount;
         uint256 fee;
         uint256 timestamp;
         string  sourceCurrency;
+        string  sourceCountry;
         string  destCountry;
     }
 
@@ -1202,8 +1217,8 @@ contract CrossBorderPayment {
     mapping(address => uint256[]) private userPaymentIds;
 
     /* ─── EVENTS ─── */
-    event PaymentSent(uint256 indexed paymentId, address indexed sender, address indexed receiver, uint256 amount, uint256 fee, string sourceCurrency, string destCountry, uint256 timestamp);
-    event FeeWithdrawn(address indexed owner, uint256 amount);
+    event PaymentSent(uint256 paymentId, address indexed token, address indexed sender, address indexed receiver, uint256 amount, uint256 fee, string sourceCurrency, string sourceCountry, string destCountry, uint256 timestamp);
+    event FeeWithdrawn(address indexed token, address indexed owner, uint256 amount);
     event Paused(address account);
     event Unpaused(address account);
     event LimitsUpdated(uint256 minAmount, uint256 maxAmount);
@@ -1271,8 +1286,9 @@ contract CrossBorderPayment {
         // ── State Mutators ──
         uint256 paymentId = payments.length;
         payments.push(Payment({
-            sender: msg.sender, receiver: _receiver, amount: msg.value, fee: fee,
-            timestamp: block.timestamp, sourceCurrency: _sourceCurrency, destCountry: _destCountry
+            token: address(0), sender: msg.sender, receiver: _receiver,
+            amount: msg.value, fee: fee, timestamp: block.timestamp,
+            sourceCurrency: _sourceCurrency, sourceCountry: _sourceCountry, destCountry: _destCountry
         }));
 
         userPaymentIds[msg.sender].push(paymentId);
@@ -1283,42 +1299,43 @@ contract CrossBorderPayment {
         (bool success, ) = _receiver.call{value: transferAmount}("");
         require(success, "Settlement failed structurally");
 
-        emit PaymentSent(paymentId, msg.sender, _receiver, msg.value, fee, _sourceCurrency, _sourceCountry, _destCountry, block.timestamp);
+        emit PaymentSent(paymentId, address(0), msg.sender, _receiver, msg.value, fee, _sourceCurrency, _sourceCountry, _destCountry, block.timestamp);
     }
 
     /**
      * @dev ERC20 token payment routing with platform fee.
      *      User must approve the contract as spender first.
      */
-    function sendTokenPayment(address _token, address _receiver, uint256 _amount, string calldata _sourceCurrency, string calldata _sourceCountry, string calldata _destCountry) 
-        external whenNotPaused notBlacklisted(msg.sender) notBlacklisted(_receiver)
-    {
+    function sendTokenPayment(
+        address _token,
+        address _receiver,
+        uint256 _amount,
+        string calldata _sourceCurrency,
+        string calldata _sourceCountry,
+        string calldata _destCountry
+    ) external whenNotPaused notBlacklisted(msg.sender) notBlacklisted(_receiver) {
         require(_amount > 0, "Zero amount");
         require(_token != address(0), "Invalid token");
+        require(_receiver != address(0), "Invalid receiver");
+        require(_receiver != msg.sender, "Cannot send to yourself");
 
         uint256 fee = (_amount * feePercentage) / 10000;
         uint256 transferAmount = _amount - fee;
 
-        // Record payment (using msg.value=0 as it's a token payment)
         uint256 paymentId = payments.length;
         payments.push(Payment({
-            sender: msg.sender, receiver: _receiver, amount: _amount, fee: fee,
-            timestamp: block.timestamp, sourceCurrency: _sourceCurrency, destCountry: _destCountry
+            token: _token, sender: msg.sender, receiver: _receiver,
+            amount: _amount, fee: fee, timestamp: block.timestamp,
+            sourceCurrency: _sourceCurrency, sourceCountry: _sourceCountry,
+            destCountry: _destCountry
         }));
-
         userPaymentIds[msg.sender].push(paymentId);
         userPaymentIds[_receiver].push(paymentId);
-        totalFeesCollected += fee; // Note: In a real app, you'd track tokens separately
 
-        // Pull tokens from sender
-        bool pulled = IERC20(_token).transferFrom(msg.sender, address(this), _amount);
-        require(pulled, "Token pull failed");
+        require(IERC20(_token).transferFrom(msg.sender, address(this), fee), "Fee transfer failed");
+        require(IERC20(_token).transferFrom(msg.sender, _receiver, transferAmount), "Payment transfer failed");
 
-        // Send tokens to receiver
-        bool sent = IERC20(_token).transfer(_receiver, transferAmount);
-        require(sent, "Token send failed");
-
-        emit PaymentSent(paymentId, msg.sender, _receiver, _amount, fee, _sourceCurrency, _sourceCountry, _destCountry, block.timestamp);
+        emit PaymentSent(paymentId, _token, msg.sender, _receiver, _amount, fee, _sourceCurrency, _sourceCountry, _destCountry, block.timestamp);
     }
 
     function withdrawFees() external onlyOwner {
@@ -1326,13 +1343,7 @@ contract CrossBorderPayment {
         require(balance > 0, "Treasury empty");
         (bool success, ) = payable(owner).call{value: balance}("");
         require(success, "Withdrawal execution fault");
-        emit FeeWithdrawn(owner, balance);
-    }
-    
-    // Minimal IERC20 for internal use
-    interface IERC20 {
-        function transfer(address to, uint256 value) external returns (bool);
-        function transferFrom(address from, address to, uint256 value) external returns (bool);
+        emit FeeWithdrawn(address(0), owner, balance);
     }
 
     /* ─── VIEW ─── */
@@ -1439,43 +1450,27 @@ window.initIDE = function() {
         compilerWorker.postMessage({ id: Date.now(), type: 'COMPILE', payload: { sourceCode } });
     };
 
-    // Bind Deploy Button
+    // Bind Deploy Button — redirects to the single sidebar deployContract() flow
     document.getElementById('deploy-custom-btn').onclick = async () => {
-        if (!customCompiledData || !signer) {
-            showNotification('Wallet connection required for deployment', 'error');
+        if (!customCompiledData) {
+            showNotification('Compile a contract first', 'error');
             return;
         }
-        
-        const deployBtn = document.getElementById('deploy-custom-btn');
-        const origHTML = deployBtn.innerHTML;
-        deployBtn.disabled = true;
-        deployBtn.innerHTML = '<span>⏳</span> Deploying...';
-
-        try {
-            logCompiler('Requesting MetaMask signature...', 'system');
-            showNotification('Confirm deployment in MetaMask');
-
-            const factory = new ethers.ContractFactory(customCompiledData.abi, customCompiledData.bytecode, signer);
-            const deployed = await factory.deploy(50); 
-            
-            logCompiler('Transaction submitted. Mining...', 'system');
-            await deployed.waitForDeployment();
-            
-            const address = await deployed.getAddress();
-            logCompiler(`Deployed at ${address}`, 'success');
-            
-            localStorage.setItem('cbp_contract_address', address);
-            
-            logCompiler('Contract active. Reloading...', 'success');
-            showNotification('Contract Deployed Successfully', 'success');
-            
-            setTimeout(() => { window.location.reload(); }, 2000);
-            
-        } catch (err) {
-            logCompiler(`Deploy failed: ${err.message}`, 'error');
-            deployBtn.disabled = false;
-            deployBtn.innerHTML = origHTML;
+        if (!signer) {
+            showNotification('Connect wallet first (use sidebar)', 'error');
+            logCompiler('Wallet not connected. Click "Initialize Secure Handshake" first.', 'error');
+            return;
         }
+
+        // Store compiled data so deployContract() picks it up
+        window._pendingDeployData = customCompiledData;
+
+        logCompiler('Handing off to main deploy pipeline...', 'system');
+        showNotification('Deploying compiled contract via sidebar...', 'info');
+
+        // Navigate back to dashboard and trigger deploy
+        switchPage('dashboard');
+        await deployContract(customCompiledData);
     };
 
     // Console toggle
